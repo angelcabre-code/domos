@@ -634,6 +634,12 @@ def compute_system_incidents():
             continue
         dinfo = devs.get(dev_id, {})
         name = dinfo.get("name", dev_id)
+        cat = str(dinfo.get("category", "")).lower()
+        name_lower = name.lower()
+
+        # Ignore portable power tool batteries (Parkside/Lidl Smart X20V, dcb, taladro)
+        if cat == "dcb" or "smart 20" in name_lower or "taladro" in name_lower or "batería smart" in name_lower:
+            continue
 
         bat_val = st.get("battery")
         if bat_val is None:
@@ -686,6 +692,12 @@ def compute_system_incidents():
             continue
         dinfo = devs.get(dev_id, {})
         name = dinfo.get("name", dev_id)
+        cat = str(dinfo.get("category", "")).lower()
+        name_lower = name.lower()
+
+        # Ignore portable power tool batteries (Parkside/Lidl Smart X20V, dcb, taladro)
+        if cat == "dcb" or "smart 20" in name_lower or "taladro" in name_lower or "batería smart" in name_lower:
+            continue
         if "bater" in name.lower() or "battery" in name.lower():
             continue
 

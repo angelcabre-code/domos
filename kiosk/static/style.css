@@ -258,8 +258,7 @@ body, html {
 .top-right-indicators .liquid-pill,
 .top-right-indicators .status-pill,
 .top-right-indicators .photo-source-pill,
-.top-right-indicators .battery-pill,
-.top-right-indicators .incident-pill {
+.top-right-indicators .battery-pill {
   height: 38px !important;
   max-height: 38px !important;
   box-sizing: border-box !important;
@@ -270,6 +269,24 @@ body, html {
   font-size: 0.85rem !important;
   line-height: 1 !important;
   vertical-align: middle !important;
+}
+
+.top-right-indicators .incident-pill {
+  height: 38px !important;
+  max-height: 38px !important;
+  box-sizing: border-box !important;
+  padding: 0 0.95rem !important;
+  display: inline-flex;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 0.85rem !important;
+  line-height: 1 !important;
+  vertical-align: middle !important;
+}
+
+.top-right-indicators .incident-pill.hidden,
+#hud-incident-pill.hidden {
+  display: none !important;
 }
 
 .top-right-indicators .liquid-pill svg,

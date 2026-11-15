@@ -6,7 +6,7 @@
   <title>Domos Smart Display</title>
   <meta name="google" content="notranslate">
   <link rel="icon" type="image/png" href="domos_logo.png">
-  <link rel="stylesheet" href="style.css?v=2.6">
+  <link rel="stylesheet" href="style.css?v=2.7">
 </head>
 <body data-theme="light">
 
@@ -65,9 +65,9 @@
         </div>
 
         <!-- Real-Time System Incidents Pill (Flashing Alert) -->
-        <div class="liquid-pill incident-pill pulsing-alert" id="hud-incident-pill" style="display:none; cursor:pointer;" title="Incidencias y avisos del sistema">
+        <div class="liquid-pill incident-pill pulsing-alert hidden" id="hud-incident-pill" style="display:none; cursor:pointer;" title="Incidencias y avisos del sistema">
           <span class="pulsing-alert-icon">⚠️</span>
-          <span id="hud-incident-count">1 aviso</span>
+          <span id="hud-incident-count">0 avisos</span>
         </div>
       </div>
     </header>
@@ -77,10 +77,6 @@
       <div class="clock-container pixel-shift-target" id="clock-touch-target">
         <div class="clock-time" id="clock-time">12:00</div>
         <div class="clock-date" id="clock-date">Viernes, 13 de Noviembre</div>
-        <div id="standby-incident-badge" class="standby-incident-badge pulsing-alert" style="display:none; cursor:pointer;" title="Pulsar para ver incidencias">
-          <span class="pulsing-alert-icon">⚠️</span>
-          <span id="standby-incident-text">1 aviso</span>
-        </div>
       </div>
 
       <!-- Liquid Glass Action Dock -->
@@ -1111,6 +1107,6 @@
       <div id="osk-keys-container"></div>
     </div>
   </div>
-  <script src="app.js?v=2.6"></script>
+  <script src="app.js?v=2.7"></script>
 </body>
 </html>

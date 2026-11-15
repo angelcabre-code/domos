@@ -2509,22 +2509,19 @@ function updateIncidentBadges(incidentsList) {
   const count = currentIncidents.length;
   const hudPill = document.getElementById("hud-incident-pill");
   const hudCount = document.getElementById("hud-incident-count");
-  const standbyBadge = document.getElementById("standby-incident-badge");
-  const standbyText = document.getElementById("standby-incident-text");
 
   if (count > 0) {
     const label = count === 1 ? "1 aviso" : `${count} avisos`;
     if (hudPill && hudCount) {
       hudCount.textContent = label;
+      hudPill.classList.remove("hidden");
       hudPill.style.display = "inline-flex";
     }
-    if (standbyBadge && standbyText) {
-      standbyText.textContent = label;
-      standbyBadge.style.display = "inline-flex";
-    }
   } else {
-    if (hudPill) hudPill.style.display = "none";
-    if (standbyBadge) standbyBadge.style.display = "none";
+    if (hudPill) {
+      hudPill.classList.add("hidden");
+      hudPill.style.display = "none";
+    }
   }
 }
 
@@ -2537,10 +2534,18 @@ async function fetchLiveIncidents() {
   } catch (e) {}
 }
 
-function openIncidentsModal() {
+async function openIncidentsModal() {
   const modal = document.getElementById("incidents-modal");
   const listContainer = document.getElementById("incidents-list-container");
   if (!modal || !listContainer) return;
+
+  try {
+    const res = await fetch("/api/incidents");
+    if (res.ok) {
+      const data = await res.json();
+      updateIncidentBadges(data.incidents || []);
+    }
+  } catch (e) {}
 
   renderIncidentsList(listContainer);
   modal.classList.remove("hidden");
