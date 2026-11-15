@@ -22,10 +22,19 @@
     <!-- Top Liquid Bar -->
     <header class="top-bar pixel-shift-target">
       <div class="top-left-stack">
-        <div class="liquid-pill weather-pill-lg" id="weather-btn" style="cursor:pointer;" title="Pulsa para ver pronóstico completo">
-          <span id="weather-icon" class="neon-svg neon-amber"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg></span>
-          <span id="weather-temp">--°C</span>
-          <span id="weather-desc">Cargando...</span>
+        <div class="liquid-pill weather-hero-widget" id="weather-btn" style="cursor:pointer;" title="Pulsa para ver pronóstico del tiempo">
+          <div class="weather-hero-icon-wrap">
+            <span id="weather-icon" class="neon-svg neon-amber"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg></span>
+          </div>
+          <div class="weather-hero-body">
+            <div class="weather-hero-main-row">
+              <span id="weather-temp" class="weather-hero-temp">--°</span>
+              <div class="weather-hero-info">
+                <span id="weather-desc" class="weather-hero-desc">Cargando...</span>
+                <span id="weather-range" class="weather-hero-range"></span>
+              </div>
+            </div>
+          </div>
         </div>
         <div id="indoor-climate-cards" class="indoor-climate-stack"></div>
         <div class="liquid-pill hud-calendar-pill" id="hud-calendar-pill" style="cursor:pointer;" title="Pulsa para abrir el Calendario Mensual"><span>📅</span><span id="hud-calendar-text">Calendario</span></div>

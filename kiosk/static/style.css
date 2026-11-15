@@ -1806,20 +1806,110 @@ body.hide-cursor * {
 
 /* photo-source-pill inherits unified glass pill styling */
 
+/* === HERO WEATHER WIDGET (HIGH GLANCEABILITY & DISTANCE VISIBILITY) === */
+.weather-hero-widget,
 .weather-pill-lg {
-  padding: 0.72rem 1.35rem !important;
-  font-size: 1.2rem !important;
-  gap: 0.65rem !important;
+  padding: 0.75rem 1.45rem !important;
+  border-radius: 26px !important;
+  background: rgba(15, 23, 42, 0.42) !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.32) !important;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.3) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 1.15rem !important;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease !important;
+  cursor: pointer;
+  will-change: transform;
 }
 
+.weather-hero-widget:hover,
+.weather-pill-lg:hover {
+  transform: translateY(-2px) scale(1.02);
+  border-color: rgba(56, 189, 248, 0.6) !important;
+  box-shadow: 0 14px 40px rgba(14, 165, 233, 0.28) !important;
+}
+
+.weather-hero-widget:active,
+.weather-pill-lg:active {
+  transform: scale(0.97);
+}
+
+.weather-hero-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.weather-hero-icon-wrap #weather-icon,
 .weather-pill-lg #weather-icon {
-  font-size: 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 0 12px currentColor);
+  transition: filter 0.4s ease;
   line-height: 1;
 }
 
+.weather-hero-icon-wrap #weather-icon svg,
+.weather-pill-lg #weather-icon svg {
+  width: 48px !important;
+  height: 48px !important;
+  stroke-width: 1.85;
+}
+
+.weather-hero-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.weather-hero-main-row {
+  display: flex;
+  align-items: center;
+  gap: 0.95rem;
+}
+
+.weather-hero-temp,
 .weather-pill-lg #weather-temp {
-  font-size: 1.5rem;
-  font-weight: 700;
+  font-size: 3.4rem !important;
+  font-weight: 200 !important;
+  line-height: 1 !important;
+  letter-spacing: -0.04em !important;
+  color: #ffffff !important;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 4px 18px rgba(0, 0, 0, 0.75), 0 1px 4px rgba(0, 0, 0, 0.6) !important;
+  transition: color 0.4s ease, text-shadow 0.4s ease;
+}
+
+.weather-hero-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.2rem;
+}
+
+.weather-hero-desc,
+.weather-pill-lg #weather-desc {
+  font-size: 1.15rem !important;
+  font-weight: 600 !important;
+  color: #f8fafc !important;
+  line-height: 1.15 !important;
+  letter-spacing: -0.01em;
+  text-transform: capitalize;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.65) !important;
+  white-space: nowrap;
+}
+
+.weather-hero-range {
+  font-size: 0.92rem !important;
+  font-weight: 500 !important;
+  color: rgba(226, 232, 240, 0.92) !important;
+  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.65) !important;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
 }
 
 .indoor-climate-stack {
@@ -1933,7 +2023,8 @@ body.hide-cursor * {
 }
 
 .hud-idle #clock-time,
-.hud-idle #clock-date {
+.hud-idle #clock-date,
+.hud-idle #weather-btn {
   opacity: 0.72 !important;
 }
 

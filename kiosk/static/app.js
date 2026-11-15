@@ -199,9 +199,25 @@ async function updateWeather() {
       const temp = Math.round(data.current.temperature_2m);
       const { icon, desc } = decodeWeatherCode(data.current.weather_code);
 
-      const wSvg = getWeatherNeonSvg(data.current.weather_code, 22); const wIconEl = document.getElementById("weather-icon"); if (wIconEl) { wIconEl.className = wSvg.cls; wIconEl.innerHTML = wSvg.svg; }
-      document.getElementById("weather-temp").textContent = `${temp}°C`;
-      document.getElementById("weather-desc").textContent = desc;
+      const wSvg = getWeatherNeonSvg(data.current.weather_code, 48);
+      const wIconEl = document.getElementById("weather-icon");
+      if (wIconEl) {
+        wIconEl.className = wSvg.cls;
+        wIconEl.innerHTML = wSvg.svg;
+      }
+      const tempEl = document.getElementById("weather-temp");
+      if (tempEl) tempEl.textContent = `${temp}°`;
+      const descEl = document.getElementById("weather-desc");
+      if (descEl) descEl.textContent = desc;
+
+      const rangeEl = document.getElementById("weather-range");
+      if (rangeEl && data.daily && Array.isArray(data.daily.temperature_2m_max) && Array.isArray(data.daily.temperature_2m_min)) {
+        const tMax = Math.round(data.daily.temperature_2m_max[0]);
+        const tMin = Math.round(data.daily.temperature_2m_min[0]);
+        const rain = data.daily.precipitation_probability_max ? data.daily.precipitation_probability_max[0] : null;
+        const rainStr = (rain !== null && rain > 0) ? ` · 💧 ${rain}%` : "";
+        rangeEl.textContent = `▲ ${tMax}° · ▼ ${tMin}°${rainStr}`;
+      }
     }
   } catch (e) {
     console.error("Error weather:", e);
@@ -222,6 +238,7 @@ function openWeatherModal() {
   if (locEl) locEl.textContent = "📍 " + getWeatherLocation().name;
   if (!latestWeatherData || !latestWeatherData.current) {
     if (curEl) curEl.innerHTML = "<p>Cargando previsión...</p>";
+    updateWeather().then(() => openWeatherModal());
     return;
   }
 
@@ -271,7 +288,7 @@ function openWeatherModal() {
   }
 }
 
-document.getElementById("weather-btn")?.addEventListener("click", () => openClimateHistoryModal());
+document.getElementById("weather-btn")?.addEventListener("click", () => openWeatherModal());
 document.getElementById("btn-weather-modal-close")?.addEventListener("click", () => {
   const m = document.getElementById("weather-modal");
   if (m) { m.classList.add("hidden"); m.style.display = "none"; }
