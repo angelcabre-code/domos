@@ -218,14 +218,34 @@ body, html {
 }
 
 .solar-pill {
-  border-color: var(--neon-amber);
-  background: var(--glass-bg);
-  box-shadow: var(--glass-specular), var(--neon-amber-glow);
+  border-color: rgba(245, 158, 11, 0.45) !important;
+  background: rgba(15, 23, 42, 0.38) !important;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25), 0 0 10px rgba(245, 158, 11, 0.12) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.65rem !important;
+  padding: 0.35rem 1.1rem !important;
+  border-radius: 9999px !important;
+  height: 42px !important;
+  box-sizing: border-box !important;
+  white-space: nowrap !important;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.solar-pill:hover {
+  border-color: rgba(245, 158, 11, 0.7) !important;
+  box-shadow: 0 6px 22px rgba(245, 158, 11, 0.25) !important;
+  transform: translateY(-1px) scale(1.02);
+}
+
+.solar-pill:active {
+  transform: scale(0.97);
 }
 
 .solar-icon-anim {
   color: var(--neon-amber);
   animation: pulse-solar 2s infinite ease-in-out;
+  flex-shrink: 0;
 }
 
 @keyframes pulse-solar {
@@ -233,20 +253,40 @@ body, html {
   50% { transform: scale(1.15); filter: drop-shadow(0 0 8px var(--neon-amber)); }
 }
 
-.solar-val {
-  font-weight: 700;
-  color: var(--neon-amber);
-  font-size: 1.05rem;
+.solar-pill-col {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  justify-content: center !important;
+  line-height: 1 !important;
+  gap: 2px !important;
+  white-space: nowrap !important;
 }
 
-.pill-badge {
-  font-size: 0.72rem;
-  background: rgba(217, 119, 6, 0.18);
-  color: var(--neon-amber);
-  padding: 0.15rem 0.5rem;
-  border-radius: 9999px;
-  font-weight: 700;
-  text-transform: uppercase;
+.solar-val {
+  font-weight: 700 !important;
+  color: #fbbf24 !important;
+  font-size: 0.96rem !important;
+  line-height: 1.1 !important;
+  white-space: nowrap !important;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6) !important;
+  letter-spacing: -0.01em;
+}
+
+.solar-badge-label,
+.solar-pill .pill-badge {
+  font-size: 0.66rem !important;
+  font-weight: 700 !important;
+  color: #f59e0b !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5) !important;
+  padding: 0 !important;
+  background: transparent !important;
+  margin: 0 !important;
 }
 
 .top-right-indicators {
@@ -269,6 +309,25 @@ body, html {
   font-size: 0.85rem !important;
   line-height: 1 !important;
   vertical-align: middle !important;
+  white-space: nowrap !important;
+}
+
+.top-right-indicators .photo-source-pill,
+#hud-photo-badge {
+  padding: 0 1.25rem !important;
+  min-width: 126px !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  gap: 0.55rem !important;
+}
+
+#hud-photo-badge #hud-photo-label {
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  overflow: visible !important;
+  display: inline-block !important;
+  font-weight: 600 !important;
+  font-size: 0.88rem !important;
 }
 
 .top-right-indicators .incident-pill {

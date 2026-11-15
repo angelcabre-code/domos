@@ -1081,8 +1081,10 @@ function renderHudIndicators() {
   if (solarEl) solarEl.textContent = `${solarWatts} W`;
 
   const solarBadge = document.getElementById("hud-solar-badge");
-  if (solarBadge && typeof solarWatts === "number") {
-    solarBadge.textContent = solarWatts > 0 ? "Generando" : "Standby";
+  if (solarBadge) {
+    const isGenerating = typeof solarWatts === "number" && solarWatts > 0;
+    solarBadge.textContent = isGenerating ? "Generando" : "Standby";
+    solarBadge.style.color = isGenerating ? "#10b981" : "#f59e0b";
   }
 
   // 2. Security Alarm
