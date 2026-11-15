@@ -2765,15 +2765,16 @@ document.getElementById("wmodal-city-input")?.addEventListener("keydown", (e) =>
 });
 
 // --- Solar Panels Detail Modal ---
-function renderSolarModalContent(solar, battery, extra) {
+function renderSolarModalContent(solar, battery, extra, power) {
   const body = document.getElementById("solar-modal-body");
   if (!body) return;
   const s = (solar && solar.state) || {};
   const b = (battery && battery.state) || {};
   const ex = extra || {};
+  const p = power || {};
 
   const watts = s.watts !== undefined ? s.watts : "--";
-  const volts = s.volts !== undefined ? s.volts : "--";
+  const volts = s.volts !== undefined ? s.volts : (p.devices && p.devices[0] ? p.devices[0].volts : "--");
   const amps = s.amps !== undefined ? s.amps : "--";
   const isProducing = Number(s.watts || 0) > 0;
   const statusLabel = isProducing ? "🟢 Produciendo" : (s.state ? "🟡 Standby (Listo)" : "🔴 Apagado");
@@ -2782,38 +2783,86 @@ function renderSolarModalContent(solar, battery, extra) {
     : "Calculando...";
   const faultText = ex.fault === 0 ? "✅ Sin fallos" : (ex.fault !== undefined ? `⚠️ Código ${ex.fault}` : "—");
   const breaker = ex.breaker_number || "—";
-  const updated = s.updated_at ? new Date(s.updated_at).toLocaleTimeString("es-ES") : "—";
+  const updated = s.updated_at ? new Date(s.updated_at).toLocaleTimeString("es-ES") : (p.updated_at || "—");
+
+  // Power Consumption Metrics
+  const totalConsW = p.total_consumption_watts !== undefined ? p.total_consumption_watts : "--";
+  const netBalW = p.net_balance_watts !== undefined ? p.net_balance_watts : "--";
+  const isSurplus = typeof netBalW === "number" && netBalW >= 0;
+  const netLabel = isSurplus ? `+${netBalW} W Excedente Solar` : `${netBalW} W Importación de Red`;
+  const netColor = isSurplus ? "#10b981" : "#38bdf8";
+
+  // Monitored Devices List
+  const devList = (p.devices || []).map(d => {
+    const dWatts = d.watts !== undefined ? `${d.watts} W` : "-- W";
+    const statusPill = d.on 
+      ? `<span style="font-size:0.72rem; padding:0.15rem 0.5rem; border-radius:999px; background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3);">Activo</span>`
+      : `<span style="font-size:0.72rem; padding:0.15rem 0.5rem; border-radius:999px; background:rgba(255,255,255,0.06); color:var(--modal-text-muted);">Apagado</span>`;
+    return `
+      <div class="domos-modal-subcard" style="padding:0.75rem 0.95rem; border-radius:14px; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div style="font-weight:700; font-size:0.9rem; color:var(--modal-text);">${d.name}</div>
+          <div style="font-size:0.75rem; color:var(--modal-text-muted);">${d.volts} V · ${d.amps} A</div>
+        </div>
+        <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:0.2rem;">
+          <div style="font-size:1.15rem; font-weight:800; color:#38bdf8;">${dWatts}</div>
+          ${statusPill}
+        </div>
+      </div>
+    `;
+  }).join("") || `<p style="font-size:0.8rem; color:var(--modal-text-muted); margin:0;">No hay enchufes de medición disponibles en LAN.</p>`;
 
   body.innerHTML = `
-    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:0.75rem;">
-      <div style="padding:0.9rem; border-radius:16px; background:var(--modal-subcard-bg); border:1px solid var(--modal-subcard-border); color:var(--modal-text);">
-        <div style="font-size:0.78rem; color:var(--modal-text-muted);">Potencia Actual</div>
-        <div style="font-size:1.7rem; font-weight:700; color:#fbbf24; margin-top:2px;">${watts} W</div>
-        <div style="font-size:0.78rem; color:var(--modal-text-muted); margin-top:2px;">${statusLabel}</div>
+    <!-- Fila 1: Generación Solar y Consumo -->
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:0.75rem;">
+      <div class="domos-modal-subcard" style="padding:0.85rem; border-radius:16px;">
+        <div style="font-size:0.74rem; color:var(--modal-text-muted); text-transform:uppercase; font-weight:600;">Generación Solar</div>
+        <div style="font-size:1.55rem; font-weight:800; color:#fbbf24; margin-top:2px;">${watts} W</div>
+        <div style="font-size:0.75rem; color:var(--modal-text-muted);">${statusLabel}</div>
       </div>
-      <div style="padding:0.9rem; border-radius:16px; background:var(--modal-subcard-bg); border:1px solid var(--modal-subcard-border); color:var(--modal-text);">
-        <div style="font-size:0.78rem; color:var(--modal-text-muted);">Tensión / Intensidad</div>
-        <div style="font-size:1.45rem; font-weight:700; color:#38bdf8; margin-top:2px;">${volts} V</div>
-        <div style="font-size:0.85rem; color:var(--modal-text-muted); margin-top:2px;">Corriente: <strong>${amps} A</strong></div>
+      <div class="domos-modal-subcard" style="padding:0.85rem; border-radius:16px;">
+        <div style="font-size:0.74rem; color:var(--modal-text-muted); text-transform:uppercase; font-weight:600;">Consumo Monitorizado</div>
+        <div style="font-size:1.55rem; font-weight:800; color:#38bdf8; margin-top:2px;">${totalConsW} W</div>
+        <div style="font-size:0.75rem; color:var(--modal-text-muted);">Enchufes y Cargas</div>
       </div>
-      <div style="padding:0.9rem; border-radius:16px; background:var(--modal-subcard-bg); border:1px solid var(--modal-subcard-border); color:var(--modal-text);">
-        <div style="font-size:0.78rem; color:var(--modal-text-muted);">Energía Acumulada</div>
-        <div style="font-size:1.35rem; font-weight:700; color:#10b981; margin-top:2px;">${totalKwh}</div>
-        <div style="font-size:0.78rem; color:var(--modal-text-muted); margin-top:2px;">${faultText}</div>
+      <div class="domos-modal-subcard" style="padding:0.85rem; border-radius:16px;">
+        <div style="font-size:0.74rem; color:var(--modal-text-muted); text-transform:uppercase; font-weight:600;">Energía Solar Total</div>
+        <div style="font-size:1.35rem; font-weight:800; color:#10b981; margin-top:2px;">${totalKwh}</div>
+        <div style="font-size:0.75rem; color:var(--modal-text-muted);">${faultText}</div>
       </div>
     </div>
 
-    <div style="padding:0.85rem 1.1rem; border-radius:16px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); display:flex; flex-wrap:wrap; justify-content:space-between; gap:0.85rem;">
+    <!-- Fila 2: Balance Neto Hogar -->
+    <div class="domos-modal-subcard" style="padding:0.95rem 1.15rem; border-radius:18px; display:flex; justify-content:space-between; align-items:center; background:linear-gradient(135deg, rgba(255,255,255,0.04), rgba(56,189,248,0.06)); border:1px solid rgba(56,189,248,0.25);">
       <div>
-        <div style="font-size:0.78rem; color:var(--modal-text-muted);">Disyuntor / Medidor</div>
-        <div style="font-size:0.95rem; font-weight:600; color:#e2e8f0; margin-top:2px;">${breaker}</div>
+        <div style="font-size:0.75rem; color:var(--modal-text-muted); text-transform:uppercase; font-weight:600;">Balance Energético en Tiempo Real</div>
+        <div style="font-size:1.25rem; font-weight:800; color:${netColor}; margin-top:2px;">${netLabel}</div>
       </div>
-      <div style="text-align:right;">
-        <div style="font-size:0.78rem; color:var(--modal-text-muted);">Última lectura</div>
-        <div style="font-size:0.95rem; color:var(--modal-text-muted); margin-top:2px;">${updated}</div>
+      <button class="liquid-action-pill" id="btn-solar-to-schedules" style="font-size:0.78rem; padding:0.4rem 0.8rem; cursor:pointer; color:#38bdf8; border-color:rgba(56,189,248,0.4);">
+        ⏱️ Programación
+      </button>
+    </div>
+
+    <!-- Fila 3: Consumo Desglosado de Enchufes -->
+    <div style="display:flex; flex-direction:column; gap:0.6rem;">
+      <div style="font-size:0.82rem; font-weight:700; color:var(--modal-text); text-transform:uppercase; letter-spacing:0.5px;">Consumo de Enchufes Inteligentes (W)</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:0.65rem;">
+        ${devList}
       </div>
     </div>
+
+    <!-- Fila 4: Red y Medidor -->
+    <div style="padding:0.75rem 1rem; border-radius:14px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center;">
+      <span style="font-size:0.78rem; color:var(--modal-text-muted);">Tensión de Red: <strong style="color:var(--modal-text);">${volts} V</strong> · Disyuntor: ${breaker}</span>
+      <span style="font-size:0.75rem; color:var(--modal-text-muted);">Actualizado: ${updated}</span>
+    </div>
   `;
+
+  document.getElementById("btn-solar-to-schedules")?.addEventListener("click", () => {
+    const sModal = document.getElementById("solar-modal");
+    if (sModal) { sModal.classList.add("hidden"); sModal.style.display = "none"; }
+    openSchedulesModal();
+  });
 }
 
 async function openSolarModal() {
@@ -2821,12 +2870,12 @@ async function openSolarModal() {
   if (!modal) return;
   modal.classList.remove("hidden");
   modal.style.display = "flex";
-  renderSolarModalContent({ state: deviceData.solar?.state }, { state: deviceData.battery?.state }, {});
+  renderSolarModalContent({ state: deviceData.solar?.state }, { state: deviceData.battery?.state }, {}, {});
   try {
     const res = await fetch("/api/solar/details");
     if (res.ok) {
       const data = await res.json();
-      renderSolarModalContent(data.solar, data.battery, data.extra);
+      renderSolarModalContent(data.solar, data.battery, data.extra, data.power);
     }
   } catch (e) {}
 }
@@ -2840,6 +2889,250 @@ document.getElementById("solar-modal")?.addEventListener("click", (e) => {
   if (e.target.id === "solar-modal") {
     e.target.classList.add("hidden");
     e.target.style.display = "none";
+  }
+});
+
+// --- Smart Plug Scheduling & Timers Modal ---
+let selectedCountdownMins = 15;
+
+function openSchedulesModal() {
+  const modal = document.getElementById("schedules-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  modal.style.display = "flex";
+  populateScheduleDeviceSelects();
+  loadSchedulesList();
+}
+
+function closeSchedulesModal() {
+  const modal = document.getElementById("schedules-modal");
+  if (modal) {
+    modal.classList.add("hidden");
+    modal.style.display = "none";
+  }
+}
+
+document.getElementById("btn-open-schedules")?.addEventListener("click", openSchedulesModal);
+document.getElementById("btn-schedules-modal-close")?.addEventListener("click", closeSchedulesModal);
+document.getElementById("schedules-modal")?.addEventListener("click", (e) => {
+  if (e.target.id === "schedules-modal") closeSchedulesModal();
+});
+
+// Tab Switcher for Schedules Modal
+document.getElementById("tab-btn-schedules-list")?.addEventListener("click", () => {
+  document.getElementById("tab-btn-schedules-list").style.background = "rgba(56,189,248,0.2)";
+  document.getElementById("tab-btn-schedules-list").style.borderColor = "#38bdf8";
+  document.getElementById("tab-btn-schedules-list").style.color = "#fff";
+  document.getElementById("tab-btn-schedules-countdown").style.background = "";
+  document.getElementById("tab-btn-schedules-countdown").style.borderColor = "";
+  document.getElementById("tab-btn-schedules-countdown").style.color = "";
+  document.getElementById("tab-pane-schedules-list")?.classList.remove("hidden");
+  document.getElementById("tab-pane-schedules-countdown")?.classList.add("hidden");
+});
+
+document.getElementById("tab-btn-schedules-countdown")?.addEventListener("click", () => {
+  document.getElementById("tab-btn-schedules-countdown").style.background = "rgba(56,189,248,0.2)";
+  document.getElementById("tab-btn-schedules-countdown").style.borderColor = "#38bdf8";
+  document.getElementById("tab-btn-schedules-countdown").style.color = "#fff";
+  document.getElementById("tab-btn-schedules-list").style.background = "";
+  document.getElementById("tab-btn-schedules-list").style.borderColor = "";
+  document.getElementById("tab-btn-schedules-list").style.color = "";
+  document.getElementById("tab-pane-schedules-countdown")?.classList.remove("hidden");
+  document.getElementById("tab-pane-schedules-list")?.classList.add("hidden");
+});
+
+function populateScheduleDeviceSelects() {
+  const schSel = document.getElementById("sch-input-device");
+  const cdSel = document.getElementById("countdown-device-select");
+  if (!schSel && !cdSel) return;
+
+  const options = [
+    { id: "bf75842d28c31e9943g0wz", name: "Termo Eléctrico" },
+    { id: "1728645494b97e138251", name: "Secatoallas" },
+    { id: "bf2989a92a26b9381drtlg", name: "Cargador Domos (Asus)" },
+    { id: "36074611d8f15bada4e6", name: "Regleta (Tomas 1-5)" },
+    { id: "1000c0327f", name: "Altar (eWeLink)" },
+    { id: "1000b0ef21", name: "Fuente (eWeLink)" },
+    { id: "bf3aa35b1531ceffbezyrx", name: "Jardín" }
+  ];
+
+  // Also include any plugs from deviceData if available
+  if (deviceData.plugs) {
+    deviceData.plugs.forEach(p => {
+      if (!options.some(o => o.id === p.id)) {
+        options.push({ id: p.id, name: p.name || "Enchufe" });
+      }
+    });
+  }
+
+  const html = options.map(o => `<option value="${o.id}">${o.name}</option>`).join("");
+  if (schSel) schSel.innerHTML = html;
+  if (cdSel) cdSel.innerHTML = html;
+}
+
+// Collapsible Add Schedule Form
+document.getElementById("btn-toggle-add-schedule")?.addEventListener("click", () => {
+  const form = document.getElementById("form-add-schedule");
+  if (form) form.classList.toggle("hidden");
+});
+document.getElementById("btn-cancel-add-schedule")?.addEventListener("click", () => {
+  const form = document.getElementById("form-add-schedule");
+  if (form) form.classList.add("hidden");
+});
+
+async function loadSchedulesList() {
+  const container = document.getElementById("schedules-items-list");
+  if (!container) return;
+  try {
+    const res = await fetch("/api/schedules");
+    if (!res.ok) throw new Error("Error fetching schedules");
+    const list = await res.json();
+    renderSchedulesList(list);
+  } catch (e) {
+    container.innerHTML = `<p style="color:#f87171; font-size:0.85rem; margin:0;">Error cargando horarios: ${e.message}</p>`;
+  }
+}
+
+function renderSchedulesList(schedules) {
+  const container = document.getElementById("schedules-items-list");
+  if (!container) return;
+  if (!schedules || schedules.length === 0) {
+    container.innerHTML = `<p style="color:var(--modal-text-muted); font-size:0.85rem; margin:0;">No hay horarios programados. Toca "➕ Nueva Regla" para añadir uno.</p>`;
+    return;
+  }
+
+  container.innerHTML = schedules.map(s => {
+    const isEnabled = s.enabled !== false;
+    const actionBadge = s.action === "on" 
+      ? `<span style="font-size:0.75rem; font-weight:700; color:#10b981;">🟢 Encender</span>`
+      : `<span style="font-size:0.75rem; font-weight:700; color:#ef4444;">🔴 Apagar</span>`;
+    const devName = s.device_name || s.name || "Dispositivo";
+
+    return `
+      <div class="domos-modal-subcard" style="padding:0.85rem 1.1rem; border-radius:16px; display:flex; justify-content:space-between; align-items:center; gap:0.75rem;">
+        <div style="display:flex; align-items:center; gap:0.85rem;">
+          <div style="font-size:1.45rem; font-weight:800; color:#38bdf8; min-width:65px;">${s.time}</div>
+          <div>
+            <div style="font-weight:700; font-size:0.92rem; color:var(--modal-text);">${s.name || devName}</div>
+            <div style="font-size:0.75rem; color:var(--modal-text-muted); display:flex; align-items:center; gap:0.4rem; margin-top:2px;">
+              ${actionBadge} · ${devName} · Diariamente
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.5rem;">
+          <button class="liquid-action-pill btn-toggle-sch" data-id="${s.id}" style="font-size:0.75rem; padding:0.3rem 0.65rem; cursor:pointer; ${isEnabled ? 'border-color:#10b981; color:#10b981;' : 'border-color:var(--modal-input-border); color:var(--modal-text-muted);'}">
+            ${isEnabled ? 'Activo' : 'Pausado'}
+          </button>
+          <button class="liquid-action-pill btn-delete-sch" data-id="${s.id}" style="font-size:0.75rem; padding:0.3rem 0.55rem; cursor:pointer; color:#ef4444; border-color:rgba(239,68,68,0.4);">
+            🗑️
+          </button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // Attach toggle and delete listeners
+  container.querySelectorAll(".btn-toggle-sch").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      const id = e.currentTarget.dataset.id;
+      try {
+        await fetch(`/api/schedules/${id}/toggle`, { method: "POST" });
+        loadSchedulesList();
+      } catch (err) {}
+    });
+  });
+
+  container.querySelectorAll(".btn-delete-sch").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      const id = e.currentTarget.dataset.id;
+      try {
+        await fetch(`/api/schedules/${id}`, { method: "DELETE" });
+        loadSchedulesList();
+      } catch (err) {}
+    });
+  });
+}
+
+// Save new schedule
+document.getElementById("btn-save-new-schedule")?.addEventListener("click", async () => {
+  const devSel = document.getElementById("sch-input-device");
+  const actSel = document.getElementById("sch-input-action");
+  const timeInp = document.getElementById("sch-input-time");
+  const nameInp = document.getElementById("sch-input-name");
+
+  const devId = devSel ? devSel.value : "";
+  const devName = devSel && devSel.selectedOptions[0] ? devSel.selectedOptions[0].text : "Dispositivo";
+  const action = actSel ? actSel.value : "on";
+  const timeVal = timeInp ? timeInp.value : "13:00";
+  const customName = nameInp && nameInp.value.trim() ? nameInp.value.trim() : `${action === 'on' ? 'Encender' : 'Apagar'} ${devName}`;
+
+  if (!devId || !timeVal) return;
+
+  const newSchedule = {
+    name: customName,
+    device_id: devId,
+    device_name: devName,
+    code: "switch_1",
+    action: action,
+    time: timeVal,
+    days: [1, 2, 3, 4, 5, 6, 7],
+    enabled: true
+  };
+
+  try {
+    await fetch("/api/schedules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(newSchedule)
+    });
+    document.getElementById("form-add-schedule")?.classList.add("hidden");
+    if (nameInp) nameInp.value = "";
+    loadSchedulesList();
+  } catch (err) {
+    alert("Error guardando horario: " + err.message);
+  }
+});
+
+// Countdown preset pill selection
+document.querySelectorAll(".countdown-preset-pill").forEach(pill => {
+  pill.addEventListener("click", (e) => {
+    document.querySelectorAll(".countdown-preset-pill").forEach(p => p.classList.remove("active"));
+    e.currentTarget.classList.add("active");
+    selectedCountdownMins = parseInt(e.currentTarget.dataset.mins, 10) || 15;
+  });
+});
+
+// Start Countdown Button
+document.getElementById("btn-start-countdown")?.addEventListener("click", async () => {
+  const devSel = document.getElementById("countdown-device-select");
+  const actSel = document.getElementById("countdown-action-select");
+  const feedback = document.getElementById("countdown-feedback");
+
+  const devId = devSel ? devSel.value : "";
+  const devName = devSel && devSel.selectedOptions[0] ? devSel.selectedOptions[0].text : "Dispositivo";
+  const action = actSel ? actSel.value : "off";
+
+  if (!devId) return;
+
+  if (feedback) feedback.textContent = "Programando...";
+  try {
+    const res = await fetch("/api/devices/countdown", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        device_id: devId,
+        minutes: selectedCountdownMins,
+        action: action,
+        code: "switch_1"
+      })
+    });
+    const d = await res.json();
+    if (feedback) {
+      feedback.textContent = `✅ ${d.message || 'Temporizador iniciado'}`;
+      setTimeout(() => { if (feedback) feedback.textContent = ""; }, 4000);
+    }
+  } catch (err) {
+    if (feedback) feedback.textContent = `❌ Error: ${err.message}`;
   }
 });
 

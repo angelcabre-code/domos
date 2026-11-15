@@ -1074,6 +1074,134 @@ async def debug_log(request: Request):
     return {"ok": True}
 
 
+SCHEDULES_FILE = Path("/opt/domoskiosk/schedules.json")
+
+def _load_schedules_sync() -> list:
+    if not SCHEDULES_FILE.exists():
+        default_schedules = [
+            {
+                "id": "sch_termo_eco",
+                "name": "Termo (Aprovechamiento Solar)",
+                "device_id": "bf75842d28c31e9943g0wz",
+                "device_name": "Termo",
+                "code": "switch_1",
+                "action": "on",
+                "time": "13:00",
+                "days": [1, 2, 3, 4, 5, 6, 7],
+                "enabled": True
+            },
+            {
+                "id": "sch_termo_off",
+                "name": "Apagado Termo",
+                "device_id": "bf75842d28c31e9943g0wz",
+                "device_name": "Termo",
+                "code": "switch_1",
+                "action": "off",
+                "time": "16:00",
+                "days": [1, 2, 3, 4, 5, 6, 7],
+                "enabled": True
+            }
+        ]
+        try:
+            SCHEDULES_FILE.write_text(json.dumps(default_schedules, indent=2))
+            return default_schedules
+        except Exception:
+            return []
+    try:
+        return json.loads(SCHEDULES_FILE.read_text())
+    except Exception:
+        return []
+
+def _save_schedules_sync(data: list):
+    try:
+        SCHEDULES_FILE.write_text(json.dumps(data, indent=2))
+    except Exception as e:
+        print(f"[SAVE_SCHEDULES_ERR] {e}", flush=True)
+
+_last_power_cache = {}
+_last_power_cache_time = 0.0
+
+def _get_monitored_devices_power_sync():
+    global _last_power_cache, _last_power_cache_time
+    now = time.time()
+    if _last_power_cache and (now - _last_power_cache_time) < 5.0:
+        return _last_power_cache
+
+    devs_file = Path("/opt/domoskiosk/devices.json")
+    if not devs_file.exists():
+        return {"devices": [], "total_consumption_watts": 0, "net_balance_watts": 0}
+
+    try:
+        devs = json.loads(devs_file.read_text())
+    except Exception:
+        return {"devices": [], "total_consumption_watts": 0, "net_balance_watts": 0}
+
+    import tinytuya
+    monitored_ids = ["bf2989a92a26b9381drtlg", "bf75842d28c31e9943g0wz", "1728645494b97e138251"]
+    items = []
+    tot_watts = 0.0
+
+    for did in monitored_ids:
+        dev = devs.get(did)
+        if not dev or not dev.get("ip"):
+            continue
+        friendly_name = dev.get("name", "Enchufe")
+        if did == "bf2989a92a26b9381drtlg":
+            friendly_name = "Cargador Domos (Asus)"
+        try:
+            d = tinytuya.OutletDevice(dev["id"], dev["ip"], dev["key"])
+            d.set_version(float(dev.get("version", 3.3)))
+            d.set_socketPersistent(False)
+            d.set_socketTimeout(0.8)
+            st = d.status()
+            dps = st.get("dps", {})
+            p_val = round(dps.get("19", 0) / 10.0, 1)
+            v_val = round(dps.get("20", 0) / 10.0, 1)
+            i_val = round(dps.get("18", 0) / 1000.0, 3)
+            is_on = bool(dps.get("1", False))
+            if is_on:
+                tot_watts += p_val
+            items.append({
+                "id": did,
+                "name": friendly_name,
+                "watts": p_val,
+                "volts": v_val,
+                "amps": i_val,
+                "on": is_on
+            })
+        except Exception as ex:
+            items.append({
+                "id": did,
+                "name": friendly_name,
+                "watts": 0.0,
+                "volts": 230.0,
+                "amps": 0.0,
+                "on": False,
+                "error": str(ex)
+            })
+
+    solar_watts = 0.0
+    solar_f = Path("/tmp/domos_solar_status.json")
+    if solar_f.exists():
+        try:
+            s_data = json.loads(solar_f.read_text())
+            solar_watts = float(s_data.get("watts", 0.0))
+        except Exception:
+            pass
+
+    net_balance = round(solar_watts - tot_watts, 1)
+    result = {
+        "devices": items,
+        "total_consumption_watts": round(tot_watts, 1),
+        "solar_generation_watts": round(solar_watts, 1),
+        "net_balance_watts": net_balance,
+        "updated_at": datetime.datetime.now().strftime("%H:%M:%S")
+    }
+    _last_power_cache = result
+    _last_power_cache_time = now
+    return result
+
+
 @app.get("/api/solar/details")
 async def get_solar_details():
     summary = _all_devices_payload()
@@ -1090,7 +1218,102 @@ async def get_solar_details():
                     extra[c] = item.get("value")
     except Exception as e:
         extra["error"] = str(e)
-    return {"solar": solar, "battery": battery, "extra": extra}
+    
+    power_data = await asyncio.to_thread(_get_monitored_devices_power_sync)
+    return {"solar": solar, "battery": battery, "extra": extra, "power": power_data}
+
+@app.get("/api/schedules")
+async def api_get_schedules():
+    return await asyncio.to_thread(_load_schedules_sync)
+
+@app.post("/api/schedules")
+async def api_save_schedule(request: Request):
+    item = await request.json()
+    schedules = await asyncio.to_thread(_load_schedules_sync)
+    s_id = item.get("id") or f"sch_{int(time.time()*1000)}"
+    item["id"] = s_id
+    if "enabled" not in item:
+        item["enabled"] = True
+    
+    idx = next((i for i, s in enumerate(schedules) if s.get("id") == s_id), -1)
+    if idx >= 0:
+        schedules[idx] = item
+    else:
+        schedules.append(item)
+    
+    await asyncio.to_thread(_save_schedules_sync, schedules)
+    return {"success": True, "schedule": item}
+
+@app.delete("/api/schedules/{schedule_id}")
+async def api_delete_schedule(schedule_id: str):
+    schedules = await asyncio.to_thread(_load_schedules_sync)
+    schedules = [s for s in schedules if s.get("id") != schedule_id]
+    await asyncio.to_thread(_save_schedules_sync, schedules)
+    return {"success": True}
+
+@app.post("/api/schedules/{schedule_id}/toggle")
+async def api_toggle_schedule(schedule_id: str):
+    schedules = await asyncio.to_thread(_load_schedules_sync)
+    found = None
+    for s in schedules:
+        if s.get("id") == schedule_id:
+            s["enabled"] = not s.get("enabled", True)
+            found = s
+            break
+    if found:
+        await asyncio.to_thread(_save_schedules_sync, schedules)
+        return {"success": True, "schedule": found}
+    return JSONResponse({"error": "Schedule not found"}, status_code=404)
+
+@app.post("/api/devices/countdown")
+async def api_device_countdown(request: Request):
+    data = await request.json()
+    dev_id = data.get("device_id")
+    minutes = int(data.get("minutes", 30))
+    action = data.get("action", "off")
+    code = data.get("code", "switch_1")
+
+    devs_file = Path("/opt/domoskiosk/devices.json")
+    devs = {}
+    if devs_file.exists():
+        try:
+            devs = json.loads(devs_file.read_text())
+        except Exception:
+            pass
+    dev = devs.get(dev_id, {})
+
+    success = False
+    details = ""
+    if dev and dev.get("ip") and dev.get("key"):
+        try:
+            import tinytuya
+            d = tinytuya.OutletDevice(dev["id"], dev["ip"], dev["key"])
+            d.set_version(float(dev.get("version", 3.3)))
+            d.set_socketPersistent(False)
+            d.set_socketTimeout(2.0)
+            sec = minutes * 60
+            d.set_value(9, sec)
+            success = True
+            details = f"Temporizador hardware fijado a {minutes} min ({sec}s) en {dev.get('name')}"
+        except Exception as e:
+            details = f"Fallo hardware ({e}), programando en servidor..."
+
+    if not success:
+        async def _run_timer():
+            await asyncio.sleep(minutes * 60)
+            val = False if action == "off" else True
+            try:
+                if ewelink_service.service.has_device(dev_id):
+                    await asyncio.to_thread(ewelink_service.service.send_command, dev_id, val)
+                else:
+                    await asyncio.to_thread(tuya_service.service.send_command, dev_id, code, val)
+            except Exception as e:
+                print(f"[COUNTDOWN_EXEC_ERR] {e}", flush=True)
+        asyncio.create_task(_run_timer())
+        success = True
+        details = f"Temporizador programado para {minutes} min"
+
+    return {"success": success, "message": details}
 
 @app.get("/api/cameras")
 async def get_cameras():
@@ -1882,6 +2105,46 @@ async def monitor_climate_history_loop():
         except Exception as e:
             print(f"[CLIMATE_LOGGER_ERR] {e}", flush=True)
         await asyncio.sleep(600)
+
+async def monitor_schedules_loop():
+    print("[SCHEDULES] Smart plug & device scheduler started", flush=True)
+    while True:
+        try:
+            now = datetime.datetime.now()
+            cur_time = now.strftime("%H:%M")
+            cur_weekday = now.isoweekday() # 1=Mon, 7=Sun
+            today_date = now.strftime("%Y-%m-%d")
+
+            schedules = _load_schedules_sync()
+            changed = False
+            for s in schedules:
+                if not s.get("enabled", True):
+                    continue
+                if s.get("time") == cur_time and cur_weekday in s.get("days", [1,2,3,4,5,6,7]):
+                    if s.get("last_run_date") != today_date:
+                        dev_id = s.get("device_id")
+                        code = s.get("code", "switch_1")
+                        val = True if s.get("action") == "on" else False
+                        print(f"[SCHEDULE] Executing {s.get('name')}: {dev_id} -> {val}", flush=True)
+                        try:
+                            if ewelink_service.service.has_device(dev_id):
+                                await asyncio.to_thread(ewelink_service.service.send_command, dev_id, val)
+                            else:
+                                await asyncio.to_thread(tuya_service.service.send_command, dev_id, code, val)
+                            s["last_run_date"] = today_date
+                            s["last_run_time"] = now.strftime("%Y-%m-%d %H:%M:%S")
+                            changed = True
+                        except Exception as e_cmd:
+                            print(f"[SCHEDULE_ERR] {e_cmd}", flush=True)
+            if changed:
+                _save_schedules_sync(schedules)
+        except Exception as e:
+            print(f"[SCHEDULES_LOOP_ERR] {e}", flush=True)
+        await asyncio.sleep(25)
+
+@app.on_event("startup")
+async def start_schedules_scheduler():
+    asyncio.create_task(monitor_schedules_loop())
 
 @app.on_event("startup")
 async def start_climate_logger():

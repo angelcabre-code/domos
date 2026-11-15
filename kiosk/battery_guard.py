@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """
-Battery Guard & Lifecycle Historian for Asus Transformer T100TA/T200TA
-Monitors battery level, enforces 30%-70% charge protection,
-and tracks cell health, degradation metrics, and charge/discharge cycle durations.
+Battery Guard & Anti-Death Shield for Asus Transformer T100TA/T200TA
+Monitors battery level, enforces 40%-70% charge protection,
+maintains hardware watchdog on smart plug (DPS 9 countdown),
+asserts charging continuously, dims screen at <=30%,
+and performs ACPI S3 deep suspend at <=22% to prevent irreversible S5 cold shutdown.
 """
 import os
 import time
 import json
 import logging
+import subprocess
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -22,21 +26,23 @@ logging.basicConfig(
 
 CONFIG_PATH = Path("/opt/domoskiosk/battery_config.json")
 HISTORY_PATH = Path("/opt/domoskiosk/battery_history.json")
+INCIDENTS_PATH = Path("/opt/domoskiosk/incidents.json")
 BAT_PATH = Path("/sys/class/power_supply/BATC")
 if not BAT_PATH.exists():
     bats = list(Path("/sys/class/power_supply").glob("BAT*"))
     BAT_PATH = bats[0] if bats else None
 
 DEFAULT_CONFIG = {
-    "min_pct": 30,
+    "min_pct": 40,
     "max_pct": 70,
-    "check_interval_sec": 30,
+    "check_interval_sec": 25,
     "smart_plug_type": "domos_api",
     "tuya_device_id": "YOUR_CHARGER_PLUG_DEVICE_ID",
     "tuya_ip": "",
     "tuya_local_key": "",
     "webhook_on_url": "",
-    "webhook_off_url": ""
+    "webhook_off_url": "",
+    "watchdog_countdown_sec": 3000
 }
 
 # Seed cycles from real verified historical logs (Nov 13-15)
@@ -61,12 +67,51 @@ INITIAL_SEED_CYCLES = [
   {"type": "charge", "start_time": "2026-11-13 20:26", "end_time": "2026-11-13 21:19", "duration_min": 53, "start_pct": 29, "end_pct": 70, "mode": "charge", "health_pct": 51.6}
 ]
 
+def report_battery_incident(title: str, description: str, severity: str = "warning", resolved: bool = False):
+    try:
+        incidents = []
+        if INCIDENTS_PATH.exists():
+            try:
+                incidents = json.loads(INCIDENTS_PATH.read_text())
+            except Exception:
+                incidents = []
+
+        existing = next((i for i in incidents if i.get("source") == "Batería y Energía" and not i.get("resolved")), None)
+        if resolved:
+            if existing:
+                existing["resolved"] = True
+                existing["resolved_at"] = datetime.now().isoformat()
+                INCIDENTS_PATH.write_text(json.dumps(incidents[:50], indent=2))
+            return
+
+        if existing and existing.get("severity") == severity:
+            return
+
+        new_inc = {
+            "id": f"inc_bat_{int(time.time())}",
+            "timestamp": datetime.now().isoformat(),
+            "source": "Batería y Energía",
+            "severity": severity,
+            "title": title,
+            "description": description,
+            "resolved": False
+        }
+        incidents.insert(0, new_inc)
+        INCIDENTS_PATH.write_text(json.dumps(incidents[:50], indent=2))
+    except Exception as e:
+        logging.error(f"Error logging battery incident: {e}")
+
 def load_config():
     if not CONFIG_PATH.exists():
         CONFIG_PATH.write_text(json.dumps(DEFAULT_CONFIG, indent=2))
         return DEFAULT_CONFIG
     try:
-        return json.loads(CONFIG_PATH.read_text())
+        cfg = json.loads(CONFIG_PATH.read_text())
+        # Enforce minimum safety threshold of 40% for degraded battery cell
+        if cfg.get("min_pct", 30) < 40:
+            cfg["min_pct"] = 40
+            CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
+        return cfg
     except Exception:
         return DEFAULT_CONFIG
 
@@ -183,13 +228,13 @@ def get_detailed_battery():
     }
 
 def set_plug_state(state: bool, config: dict):
-    action = "ON (Encender carga)" if state else "OFF (Cortar carga)"
+    action = "ON (Encender carga)" if state else "OFF (Cortar carga y armar Watchdog)"
     logging.info(f"Comando de enchufe: {action}")
     
-    # 1. Prioridad: Control 100% Local en red local LAN vía TinyTuya (inmune a caídas de internet)
     dev_id = config.get("tuya_device_id", "YOUR_CHARGER_PLUG_DEVICE_ID")
     ip = config.get("tuya_ip", "192.168.1.100") or "192.168.1.100"
     key = config.get("tuya_local_key", "YOUR_PLUG_LOCAL_KEY") or "YOUR_PLUG_LOCAL_KEY"
+    watchdog_sec = int(config.get("watchdog_countdown_sec", 3000))
     
     lan_success = False
     try:
@@ -197,12 +242,26 @@ def set_plug_state(state: bool, config: dict):
         d = tinytuya.OutletDevice(dev_id, ip, key)
         d.set_version(3.4)
         d.set_socketPersistent(False)
+        d.set_socketTimeout(2.5)
         if state:
+            # Clear watchdog timer and turn on relay
+            try:
+                d.set_value(9, 0)
+            except Exception:
+                pass
             res = d.turn_on()
         else:
+            # Turn off relay and set HARDWARE WATCHDOG countdown (DPS 9)
+            # The plug microcontroller counts down and turns ON automatically when timer hits 0!
             res = d.turn_off()
+            try:
+                d.set_value(9, watchdog_sec)
+                logging.info(f"🛡️ Hardware Watchdog armado en enchufe: re-encendido autónomo en {watchdog_sec}s ({round(watchdog_sec/60)} min)")
+            except Exception as e_wd:
+                logging.warning(f"No se pudo fijar watchdog DPS 9: {e_wd}")
+
         if isinstance(res, dict) and not res.get("Error"):
-            logging.info(f"✅ Enchufe controlado con ÉXITO en LAN local ({ip}) sin requerir internet.")
+            logging.info(f"✅ Enchufe controlado con ÉXITO en LAN local ({ip}).")
             lan_success = True
         else:
             logging.warning(f"Respuesta local inesperada: {res}")
@@ -210,9 +269,7 @@ def set_plug_state(state: bool, config: dict):
         logging.warning(f"Aviso: control LAN local no respondió ({e}), intentando vía API Domos...")
 
     if lan_success:
-        # Notificar a Domos API para reflejar el estado en la interfaz si el servidor está activo
         try:
-            import urllib.request
             req = urllib.request.Request(
                 "http://127.0.0.1:8080/api/devices/control",
                 data=json.dumps({"device_id": dev_id, "code": "switch_1", "value": bool(state)}).encode("utf-8"),
@@ -224,10 +281,9 @@ def set_plug_state(state: bool, config: dict):
             pass
         return
 
-    # 2. Respaldo (Fallback): Si la LAN falla o cambia de IP, controlar vía Domos API / Cloud
+    # Fallback to Domos API / Cloud
     logging.info("Intentando control de respaldo vía Domos API / Tuya Cloud...")
     try:
-        import urllib.request
         req = urllib.request.Request(
             "http://127.0.0.1:8080/api/devices/control",
             data=json.dumps({"device_id": dev_id, "code": "switch_1", "value": bool(state)}).encode("utf-8"),
@@ -240,8 +296,9 @@ def set_plug_state(state: bool, config: dict):
         logging.error(f"Error en control de respaldo Domos API: {e}")
 
 def main():
-    logging.info("Iniciando Battery Guard & Lifecycle Historian para Asus T100TA/T200TA")
+    logging.info("Iniciando Battery Guard & Anti-Death Shield para Asus T100TA/T200TA")
     last_action = None
+    emergency_dimmed = False
     history = load_history()
     
     while True:
@@ -251,18 +308,31 @@ def main():
             
             if bat:
                 cap = bat["capacity"]
+                status = bat["status"]
+                is_charging = (status == "Charging")
                 now_dt = datetime.now()
                 now_str = now_dt.strftime("%Y-%m-%d %H:%M")
                 now_ts = now_dt.timestamp()
-                min_p = config.get("min_pct", 30)
+                min_p = config.get("min_pct", 40)
                 max_p = config.get("max_pct", 70)
 
                 history["telemetry"] = bat
 
+                # If charging is verified, restore screen brightness and resolve pending incidents
+                if is_charging:
+                    if emergency_dimmed:
+                        logging.info("Carga activa detectada: restaurando brillo a 80%.")
+                        try:
+                            subprocess.run(["sudo", "brightnessctl", "set", "80%"], check=False)
+                            emergency_dimmed = False
+                        except Exception:
+                            pass
+                    report_battery_incident("", "", resolved=True)
+
                 current_phase = history.get("current_phase", {})
                 if not current_phase or "type" not in current_phase:
                     current_phase = {
-                        "type": "charge" if bat["status"] == "Charging" else "discharge",
+                        "type": "charge" if is_charging else "discharge",
                         "start_time": now_str,
                         "start_pct": cap,
                         "start_ts": now_ts,
@@ -271,7 +341,7 @@ def main():
                     }
                     history["current_phase"] = current_phase
 
-                # Update live elapsed time in current phase
+                # Update live elapsed time
                 start_ts = current_phase.get("start_ts", now_ts)
                 if abs(now_ts - start_ts) > 86400 * 2:
                     start_ts = now_ts - 29 * 60
@@ -279,9 +349,41 @@ def main():
                 current_phase["current_pct"] = cap
                 current_phase["elapsed_min"] = max(0, round((now_ts - start_ts) / 60))
 
-                # Logic 1: If >= max_pct and charging, cut power & record completed charge cycle
-                if cap >= max_p and last_action != "OFF":
-                    logging.info(f"Batería al {cap}% (>= {max_p}%). Cortando carga.")
+                # EMERGENCY DEFENSE 1: Below 30% and not charging -> Dim screen to 5%
+                if cap <= 30 and not is_charging:
+                    if not emergency_dimmed:
+                        logging.warning(f"⚠️ Batería baja al {cap}% sin carga. Activando modo ahorro extremo (brillo 5%).")
+                        try:
+                            subprocess.run(["sudo", "brightnessctl", "set", "5%"], check=False)
+                            emergency_dimmed = True
+                        except Exception:
+                            pass
+                        report_battery_incident(
+                            "Batería Baja: Modo Ahorro Extremo",
+                            f"La batería ha bajado al {cap}%. El enchufe no está suministrando corriente. Brillo reducido al 5% para evitar apagado.",
+                            severity="warning"
+                        )
+
+                # EMERGENCY DEFENSE 2: Critical <= 22% and not charging -> ACPI S3 Deep Suspend
+                # Asus Transformer cannot cold-boot from 0% (S5) without physical power button press.
+                # Suspend to RAM drops consumption from 10W to 0.08W, giving 4+ days of survival.
+                if cap <= 22 and not is_charging:
+                    logging.critical(f"🛑 BATERÍA CRÍTICA AL {cap}%. Entrando en suspensión ACPI S3 para evitar muerte en S5.")
+                    report_battery_incident(
+                        "Alerta Crítica: Suspensión de Emergencia",
+                        f"Batería al {cap}% sin alimentación. Domos entra en suspensión RAM (S3) para proteger la batería y evitar el apagado irrecuperable en frío.",
+                        severity="critical"
+                    )
+                    save_history(history)
+                    try:
+                        subprocess.run(["sync"], check=False)
+                        subprocess.run(["sudo", "systemctl", "suspend"], check=False)
+                    except Exception as e_susp:
+                        logging.error(f"Error al suspender: {e_susp}")
+
+                # LOGIC: CUT POWER AT MAX_PCT (70%)
+                if cap >= max_p and is_charging and last_action != "OFF":
+                    logging.info(f"Batería al {cap}% (>= {max_p}%). Cortando carga y activando watchdog de 50 min.")
                     set_plug_state(False, config)
                     last_action = "OFF"
 
@@ -311,46 +413,48 @@ def main():
                     recompute_stats(history)
                     save_history(history)
 
-                # Logic 2: If <= min_pct and discharging, restore power & record completed discharge cycle
-                elif cap <= min_p and last_action != "ON":
-                    logging.info(f"Batería al {cap}% (<= {min_p}%). Iniciando carga.")
-                    set_plug_state(True, config)
-                    last_action = "ON"
+                # LOGIC: RESTORE POWER AT MIN_PCT (40%) - CONTINUOUS ASSERTION
+                elif cap <= min_p:
+                    # If not charging, continuously assert ON command every tick!
+                    if not is_charging:
+                        logging.warning(f"Batería al {cap}% (<= {min_p}%) y NO cargando. Forzando encendido de enchufe...")
+                        set_plug_state(True, config)
 
-                    if current_phase.get("type") == "discharge":
-                        dur = max(1, current_phase["elapsed_min"])
-                        is_night = (now_dt.hour >= 23 or now_dt.hour < 8)
-                        history["cycles"].insert(0, {
-                            "type": "discharge",
-                            "start_time": current_phase.get("start_time", now_str),
-                            "end_time": now_str,
-                            "duration_min": dur,
-                            "start_pct": current_phase.get("start_pct", max_p),
-                            "end_pct": cap,
-                            "mode": "night" if is_night else "day",
-                            "health_pct": bat["health_pct"]
-                        })
+                    if last_action != "ON":
+                        last_action = "ON"
+                        if current_phase.get("type") == "discharge":
+                            dur = max(1, current_phase["elapsed_min"])
+                            is_night = (now_dt.hour >= 23 or now_dt.hour < 8)
+                            history["cycles"].insert(0, {
+                                "type": "discharge",
+                                "start_time": current_phase.get("start_time", now_str),
+                                "end_time": now_str,
+                                "duration_min": dur,
+                                "start_pct": current_phase.get("start_pct", max_p),
+                                "end_pct": cap,
+                                "mode": "night" if is_night else "day",
+                                "health_pct": bat["health_pct"]
+                            })
 
-                    # Begin charge phase
-                    history["current_phase"] = {
-                        "type": "charge",
-                        "start_time": now_str,
-                        "start_pct": cap,
-                        "start_ts": now_ts,
-                        "current_pct": cap,
-                        "elapsed_min": 0
-                    }
-                    history["cycles"] = history["cycles"][:60]
-                    recompute_stats(history)
-                    save_history(history)
+                        # Begin charge phase
+                        history["current_phase"] = {
+                            "type": "charge",
+                            "start_time": now_str,
+                            "start_pct": cap,
+                            "start_ts": now_ts,
+                            "current_pct": cap,
+                            "elapsed_min": 0
+                        }
+                        history["cycles"] = history["cycles"][:60]
+                        recompute_stats(history)
+                        save_history(history)
                 else:
-                    # Periodic save of live telemetry
                     save_history(history)
 
         except Exception as e:
             logging.error(f"Error in battery loop: {e}")
 
-        time.sleep(config.get("check_interval_sec", 30))
+        time.sleep(config.get("check_interval_sec", 25))
 
 if __name__ == "__main__":
     main()
