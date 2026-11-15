@@ -1,0 +1,21 @@
+[Unit]
+Description=Domos Cage Wayland Kiosk
+After=systemd-user-sessions.service domoskiosk-server.service
+Conflicts=getty@tty1.service
+
+[Service]
+User=domos
+PAMName=login
+Environment=XDG_SESSION_TYPE=wayland
+Environment=XDG_CURRENT_DESKTOP=Cage
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+ExecStart=/usr/bin/cage -s -- /opt/domoskiosk/kiosk_launch.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target

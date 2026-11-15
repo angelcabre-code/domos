@@ -1,0 +1,32 @@
+{
+  "photo_folder": "Images",
+  "carousel_mode": "mixed",
+  "carousel_transition": "blur",
+  "slide_interval_sec": 60,
+  "theme": "dark",
+  "layout_mode": "rooms",
+  "hidden_devices": [],
+  "device_order": [],
+  "favorite_devices": [],
+  "custom_rooms": [
+    {
+      "id": "zone_salon",
+      "icon": "\ud83d\udecb\ufe0f",
+      "label": "Sal\u00f3n",
+      "builtin": true
+    },
+    {
+      "id": "zone_dormitorio",
+      "icon": "\ud83d\udecf\ufe0f",
+      "label": "Dormitorio",
+      "builtin": false
+    }
+  ],
+  "calendar_ics_urls": [
+    {
+      "name": "Family Calendar",
+      "url": "https://calendar.google.com/calendar/ical/your_calendar_address/basic.ics"
+    }
+  ],
+  "high_volume_unlocked": false
+}

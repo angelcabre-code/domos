@@ -1,0 +1,16 @@
+[Unit]
+Description=Domos Smart Presence and Night Backlight Manager
+After=network.target domoskiosk-server.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/domoskiosk
+ExecStart=/usr/bin/python3 /opt/domoskiosk/presence_service.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

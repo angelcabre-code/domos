@@ -1,0 +1,15 @@
+[Unit]
+Description=Domos Offline Voice Assistant (Vosk Spanish)
+After=network.target sound.target
+
+[Service]
+Type=simple
+User=domos
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+WorkingDirectory=/opt/domoskiosk
+ExecStart=/usr/bin/python3 /opt/domoskiosk/voice_service.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

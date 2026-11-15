@@ -1,0 +1,43 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Configuration files with secrets & tokens (NEVER COMMIT)
+*.json
+!*.example.json
+!package.json
+!tsconfig.json
+*.yaml
+*.yml
+!*.example.yaml
+!*.example.yml
+
+# Logs & temp files
+*.log
+/tmp/
+/var/log/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Android build outputs & local properties
+android/.gradle/
+android/build/
+android/*/build/
+android/local.properties
+android/.kotlin/
+*.apk
+*.aab
+
+# Model binaries & TTS voice weights
+voice_models/
+*.onnx
+*.onnx.json

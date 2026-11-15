@@ -1,0 +1,10 @@
+{
+  "example_switch_1": {
+    "id": "example_switch_1",
+    "name": "Luz Sal\u00f3n",
+    "key": "YOUR_LOCAL_KEY",
+    "category": "cz",
+    "ip": "192.168.1.101",
+    "version": "3.3"
+  }
+}

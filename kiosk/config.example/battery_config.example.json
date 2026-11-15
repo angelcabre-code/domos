@@ -1,0 +1,11 @@
+{
+  "min_pct": 30,
+  "max_pct": 70,
+  "check_interval_sec": 30,
+  "smart_plug_type": "domos_api",
+  "tuya_device_id": "YOUR_CHARGER_PLUG_DEVICE_ID",
+  "tuya_ip": "192.168.1.100",
+  "tuya_local_key": "YOUR_PLUG_LOCAL_KEY",
+  "webhook_on_url": "",
+  "webhook_off_url": ""
+}

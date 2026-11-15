@@ -1,0 +1,14 @@
+[Unit]
+Description=Domos Battery Guard & Lifecycle Historian
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/domoskiosk
+ExecStart=/usr/bin/python3 /opt/domoskiosk/battery_guard.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

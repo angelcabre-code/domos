@@ -1,0 +1,5 @@
+{
+  "region": "eu",
+  "api_key": "YOUR_TUYA_OPENAPI_KEY",
+  "api_secret": "YOUR_TUYA_OPENAPI_SECRET"
+}

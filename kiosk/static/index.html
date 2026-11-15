@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Domos Smart Display</title>
+  <meta name="google" content="notranslate">
+  <link rel="icon" type="image/png" href="domos_logo.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-theme="light">
+
+  <!-- Ambient Photo / Nature Slideshow -->
+  <div id="slideshow-container">
+    <div id="slide-current" class="slide active"></div>
+    <div id="slide-next" class="slide"></div>
+    <div class="vignette-overlay"></div>
+  </div>
+
+  <!-- Ambient HUD Layer (Liquid Glass with Anti-Burn-In Protection) -->
+  <div id="hud-layer">
+    <!-- Top Liquid Bar -->
+    <header class="top-bar pixel-shift-target">
+      <div class="top-left-stack">
+        <div class="liquid-pill weather-pill-lg" id="weather-btn" style="cursor:pointer;" title="Pulsa para ver pronóstico completo">
+          <span id="weather-icon" class="neon-svg neon-amber"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg></span>
+          <span id="weather-temp">--°C</span>
+          <span id="weather-desc">Cargando...</span>
+        </div>
+        <div id="indoor-climate-cards" class="indoor-climate-stack"></div>
+        <div class="liquid-pill hud-calendar-pill" id="hud-calendar-pill" style="cursor:pointer;" title="Pulsa para abrir el Calendario Mensual"><span>📅</span><span id="hud-calendar-text">Calendario</span></div>
+      </div>
+
+      <!-- Real Solar Generation Live Pill -->
+      <div class="liquid-pill solar-pill" id="hud-solar-pill" style="cursor:pointer;" title="Pulsa para ver detalle de placas solares">
+        <span class="solar-icon-anim neon-svg neon-amber"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
+        <span id="hud-solar-val" class="solar-val">-- W</span>
+        <span class="pill-badge" id="hud-solar-badge">Placas</span>
+      </div>
+
+      <!-- Top Right Status Indicators -->
+      <div class="top-right-indicators">
+        <!-- Photo Source Badge -->
+        <div class="liquid-pill status-pill photo-source-pill" id="hud-photo-badge" style="cursor:pointer;" title="Pulsa para elegir origen y carpeta de fotos">
+          <span id="hud-photo-icon" class="neon-svg neon-cyan"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></span>
+          <span id="hud-photo-label">Paisajes HD</span>
+        </div>
+
+        <!-- Real Security Alarm Pill -->
+        <div class="liquid-pill status-pill" id="hud-alarm-pill">
+          <span id="hud-alarm-icon" class="neon-svg neon-emerald"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></span>
+          <span id="hud-alarm-text">Desarmada</span>
+        </div>
+
+        <!-- Real Door Contact Pill -->
+        <div class="liquid-pill status-pill" id="hud-door-pill">
+          <span id="hud-door-icon" class="neon-svg neon-emerald"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4h3a2 2 0 0 1 2 2v14"/><path d="M2 20h3"/><path d="M13 20h9"/><path d="M10 12v.01"/><path d="M13 4.562v16.157a1 1 0 0 1-1.242.97L5 20V5.562a2 2 0 0 1 1.515-1.94l4-1A2 2 0 0 1 13 4.561Z"/></svg></span>
+          <span id="hud-door-text">Cerrada</span>
+        </div>
+
+        <!-- ASUS Kiosk Battery Widget -->
+        <div class="liquid-pill battery-pill" id="battery-widget">
+          <span id="battery-icon" class="neon-svg neon-emerald"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="16" height="10" rx="2"/><line x1="22" y1="11" x2="22" y2="13"/></svg></span>
+          <span id="battery-pct">--%</span>
+        </div>
+
+        <!-- Real-Time System Incidents Pill (Flashing Alert) -->
+        <div class="liquid-pill incident-pill pulsing-alert" id="hud-incident-pill" style="display:none; cursor:pointer;" title="Incidencias y avisos del sistema">
+          <span class="pulsing-alert-icon">⚠️</span>
+          <span id="hud-incident-count">1 aviso</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Bottom Liquid Bar: Clock, Date & Control Dock -->
+    <footer class="bottom-bar">
+      <div class="clock-container pixel-shift-target" id="clock-touch-target">
+        <div class="clock-time" id="clock-time">12:00</div>
+        <div class="clock-date" id="clock-date">Viernes, 13 de Noviembre</div>
+        <div id="standby-incident-badge" class="standby-incident-badge pulsing-alert" style="display:none; cursor:pointer;" title="Pulsar para ver incidencias">
+          <span class="pulsing-alert-icon">⚠️</span>
+          <span id="standby-incident-text">1 aviso</span>
+        </div>
+      </div>
+
+      <!-- Liquid Glass Action Dock -->
+      <div class="liquid-dock pixel-shift-target">
+        <!-- Screen Dimmer Toggle -->
+        <button class="liquid-dock-btn" id="btn-dim" title="Atenuar Pantalla">
+          <span class="dock-btn-icon neon-svg neon-violet"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/><path d="M12 16v4"/><path d="m9 9 6 2M15 9l-6 2"/></svg></span>
+          <span class="dock-btn-label">Atenuar</span>
+        </button>
+
+        <!-- Theme Toggle: Light / Dark -->
+        <button class="liquid-dock-btn" id="btn-theme-toggle" title="Cambiar Tema (Claro / Oscuro)">
+          <span class="dock-btn-icon neon-svg neon-amber" id="theme-btn-icon"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg></span>
+          <span class="dock-btn-label" id="theme-btn-label">Claro</span>
+        </button>
+
+        <!-- Quick Real Light: Cocina 1 -->
+        <button class="liquid-dock-btn" id="dock-light-1" title="Luz Cocina 1">
+          <span class="dock-btn-icon neon-svg neon-amber"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg></span>
+          <span class="dock-btn-label">Cocina 1</span>
+        </button>
+
+        <!-- Quick Real Light: Cocina 2 -->
+        <button class="liquid-dock-btn" id="dock-light-2" title="Luz Cocina 2">
+          <span class="dock-btn-icon neon-svg neon-amber"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg></span>
+          <span class="dock-btn-label">Cocina 2</span>
+        </button>
+
+        <!-- Quick Camera View Button -->
+        <button class="liquid-dock-btn" id="dock-cameras-btn" title="Ver Cámaras en Directo">
+          <span class="dock-btn-icon neon-svg neon-cyan"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.934a.5.5 0 0 0-.777-.416L16 11"/><rect x="2" y="6" width="14" height="12" rx="2.5"/></svg></span>
+          <span class="dock-btn-label">Cámaras</span>
+        </button>
+
+        <!-- Radio Modal Button -->
+        <button class="liquid-dock-btn" id="dock-radio-btn" title="Radio en Directo">
+          <span class="dock-btn-icon neon-svg neon-emerald"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/></svg></span>
+          <span class="dock-btn-label">Radio</span>
+        </button>
+
+        <!-- Main Domotics Control Center Trigger -->
+        <button class="liquid-dock-btn primary-dock-btn" id="btn-drawer" title="Abrir Centro de Control Domótico">
+          <span class="dock-btn-icon neon-svg neon-sky"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg></span>
+          <span class="dock-btn-label">Panel</span>
+        </button>
+
+      </div>
+    </footer>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MINIMALIST LIQUID GLASS ASSISTANT OVERLAY (DOMOS AI)    -->
+  <!-- ======================================================== -->
+  <div id="assistant-overlay" class="hidden-assistant" aria-live="polite">
+    <div class="assistant-capsule">
+      <div class="assistant-content">
+        <div class="assistant-orb-wrapper">
+          <div id="assistant-orb" class="assistant-orb state-listening">
+            <div class="sound-wave-bars">
+              <span class="bar bar-1"></span>
+              <span class="bar bar-2"></span>
+              <span class="bar bar-3"></span>
+              <span class="bar bar-4"></span>
+              <span class="bar bar-5"></span>
+            </div>
+            <div class="liquid-morph-core"></div>
+          </div>
+        </div>
+        <div class="assistant-text-col">
+          <div class="assistant-badge-row">
+            <span class="assistant-badge">ASISTENTE DOMOS</span>
+            <span id="assistant-state-tag" class="assistant-state-tag">Escuchando</span>
+          </div>
+          <div id="assistant-prompt" class="assistant-prompt">Di "Domos" seguido de tu orden...</div>
+          <div id="assistant-reply" class="assistant-reply">Esperando comando de voz...</div>
+        </div>
+        <button class="assistant-close-btn" id="assistant-close-btn" title="Cerrar">&times;</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- FULLSCREEN LIQUID GLASS CONTROL CENTER                   -->
+  <!-- ======================================================== -->
+  <div id="controls-drawer" class="hidden-drawer">
+    <div class="liquid-drawer-backdrop" id="drawer-backdrop"></div>
+    
+    <div class="liquid-drawer-panel">
+      <!-- Panel Header -->
+      <div class="liquid-panel-header">
+        <div class="header-titles">
+          <div class="brand-row">
+            <img src="domos_logo.png" alt="DOMOS" class="drawer-brand-logo" style="width:44px; height:44px; border-radius:10px; object-fit:cover; box-shadow:0 2px 10px rgba(56,189,248,0.32); flex-shrink:0;">
+            <span class="brand-badge">DOMOS</span>
+            <span class="device-count-badge" id="devices-badge-count">42 DISPOSITIVOS TUYA REALES</span>
+          </div>
+          <h2>Centro de Control Domótico</h2>
+        </div>
+        <div class="header-actions-group">
+          <button class="liquid-edit-btn" id="btn-open-cameras-modal" title="Abrir Cámaras en Directo">
+            <span>📹</span>
+            <span>Cámaras</span>
+          </button>
+          <button type="button" class="liquid-edit-btn" id="btn-toggle-settings" title="Ajustes de pantalla, carrusel y diseño">
+            <span>⚙️</span>
+            <span>Ajustes</span>
+          </button>
+          <button type="button" class="liquid-edit-btn" id="btn-edit-controls" title="Mostrar u ocultar controles domóticos">
+            <span id="btn-edit-controls-icon">✏️</span>
+            <span id="btn-edit-controls-label">Editar Vista</span>
+          </button>
+          <button class="liquid-close-btn" id="drawer-close-btn" title="Cerrar">&times;</button>
+        </div>
+      </div>
+
+      <!-- Editable Dashboard Toolbar -->
+      <div id="edit-mode-banner" class="edit-mode-banner hidden">
+        <div class="edit-banner-info">
+          <span class="edit-banner-badge">✏️ MODO EDICIÓN</span>
+          <span class="edit-banner-text">Toca cualquier tarjeta o cámara para mostrarla (👁️) u ocultarla (🚫).</span>
+          <span id="edit-visibility-counter" class="edit-counter-pill">-- visibles · -- ocultos</span>
+        </div>
+        <div class="edit-banner-actions">
+          <button class="liquid-action-pill edit-quick-btn" id="btn-hide-inactive" title="Ocultar dispositivos apagados o inactivos">
+            🧹 Ocultar Inactivos
+          </button>
+          <button class="liquid-action-pill edit-quick-btn" id="btn-show-all-controls" title="Mostrar todos los controles">
+            👁️ Mostrar Todos
+          </button>
+          <button class="liquid-action-pill edit-done-btn" id="btn-finish-edit">
+            ✅ Listo
+          </button>
+        </div>
+      </div>
+
+      <!-- Panel Scrollable Body -->
+      <div class="liquid-panel-body">
+        <div id="drawer-settings-panel" class="drawer-settings-panel hidden">
+          <!-- AJUSTES, CARRUSEL & ANTIQUEMADO -->
+            <div class="dashboard-section" id="section-settings">
+              <div class="section-title">
+                <span class="section-icon">⚙️</span>
+                <h3>Ajustes, Carrusel & Pantalla</h3>
+              </div>
+              <div class="liquid-settings-card">
+                <!-- Organización del Panel -->
+                <div class="settings-row" style="flex-direction:column; align-items:flex-start; gap:0.5rem;">
+                  <div class="setting-label">
+                    <span>Organización del Panel</span>
+                    <span class="setting-hint">Distribución de controles</span>
+                  </div>
+                  <div class="layout-presets-row" id="layout-presets-row">
+                    <button type="button" class="layout-preset-btn active" data-layout="rooms">🏠 Por Habitaciones</button>
+                    <button type="button" class="layout-preset-btn" data-layout="type">🎛️ Por Tipo</button>
+                    <button type="button" class="layout-preset-btn" data-layout="compact">⭐ Compacta</button>
+                  </div>
+                </div>
+
+                <!-- Gestión de Zonas / Habitaciones -->
+                <div class="settings-row" style="flex-direction:column; align-items:flex-start; gap:0.45rem;">
+                  <div class="setting-label">
+                    <span>Zonas y Habitaciones</span>
+                    <span class="setting-hint">Crea nuevas zonas para agrupar controles</span>
+                  </div>
+                  <div class="custom-rooms-list" id="custom-rooms-list"></div>
+                  <div class="custom-room-add-row">
+                    <select id="new-room-emoji" class="room-emoji-select" title="Icono">
+                      <option value="🛋️">🛋️</option>
+                      <option value="🍳">🍳</option>
+                      <option value="🛏️">🛏️</option>
+                      <option value="🚿">🚿</option>
+                      <option value="🌿">🌿</option>
+                      <option value="🖥️">🖥️</option>
+                      <option value="🚗">🚗</option>
+                      <option value="🎮">🎮</option>
+                      <option value="🧺">🧺</option>
+                      <option value="📦">📦</option>
+                    </select>
+                    <input type="text" id="new-room-name-input" class="room-name-input" placeholder="Toca para escribir nueva zona (ej. Despacho)..." readonly />
+                    <button type="button" class="liquid-action-pill" id="btn-add-custom-room" style="cursor:pointer;">➕ Añadir Zona</button>
+                  </div>
+                </div>
+
+                
+                <!-- Tema Claro / Oscuro -->
+                <div class="settings-row">
+                  <div class="setting-label">
+                    <span>Tema Visual Liquid Glass</span>
+                    <span id="theme-status-tag" class="setting-val-badge">Modo Claro</span>
+                  </div>
+                  <div class="settings-theme-switcher">
+                    <button class="liquid-theme-btn active" id="btn-theme-light" data-theme-val="light">
+                      <span>☀️</span> Claro
+                    </button>
+                    <button class="liquid-theme-btn" id="btn-theme-dark" data-theme-val="dark">
+                      <span>🌙</span> Oscuro
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Modo de Carrusel -->
+                <div class="settings-row">
+                  <div class="setting-label">
+                    <span>Modo del Carrusel</span>
+                    <span class="setting-hint">Fuente de las imágenes</span>
+                  </div>
+                  <select id="carousel-mode-select" class="liquid-select">
+                    <option value="mixed">🔀 Mixto (Fotos SD + Paisajes Internet)</option>
+                    <option value="online">🌄 Paisajes de Internet (Naturaleza HD)</option>
+                    <option value="sd">📁 Tarjeta SD (Fotos Personales)</option>
+                  </select>
+                </div>
+
+                <!-- Carpeta de la Tarjeta SD -->
+                <div class="settings-row" id="row-sd-folder">
+                  <div class="setting-label">
+                    <span>Carpeta de Tarjeta SD</span>
+                    <span id="sd-folder-count" class="setting-hint">Cargando carpetas...</span>
+                  </div>
+                  <select id="photo-folder-select" class="liquid-select">
+                    <option value="Imagenes">Cargando carpetas de la SD...</option>
+                  </select>
+                </div>
+
+                <!-- Brillo Pantalla -->
+                <div class="settings-row">
+                  <div class="setting-label">
+                    <span>Brillo ASUS T200TA</span>
+                    <span id="brightness-val" class="setting-val-badge">80%</span>
+                  </div>
+                  <div class="liquid-slider-wrapper">
+                    <span>🌙</span>
+                    <input type="range" id="brightness-slider" min="10" max="100" value="80" class="liquid-slider">
+                    <span>☀️</span>
+                  </div>
+                </div>
+
+                <!-- Antiquemado Indicator -->
+                <div class="settings-notice-row">
+                  <span class="notice-icon">🛡️</span>
+                  <div class="notice-text">
+                    <strong>Protección Antiquemado Activa:</strong> Atenuación por inactividad (20s) y micro-desplazamiento de píxeles (60s) para preservar el panel IPS LCD.
+                  </div>
+                </div>
+
+                <!-- Acciones Rápidas -->
+                <div class="settings-actions">
+                  <button class="liquid-action-pill" id="btn-sync-devices">
+                    <span>🔄</span> Detectar Nuevos Tuya
+                  </button>
+                  <button class="liquid-action-pill" id="btn-test-assistant">
+                    <span>🎙️</span> Probar Asistente
+                  </button>
+                  <button class="liquid-action-pill" id="btn-reload-photos">
+                    <span>🖼️</span> Siguiente Foto
+                  </button>
+                  <button class="liquid-action-pill" id="btn-night-preset">
+                    <span>🌌</span> Noche (10%)
+                  </button>
+                  <button class="liquid-action-pill" id="btn-touch-test" style="border-color: rgba(0, 229, 255, 0.45);">
+                    <span>🧪</span> Test Táctil
+                  </button>
+                  <button class="liquid-action-pill" id="btn-reboot-device" style="border-color: rgba(245, 158, 11, 0.45); color: #f59e0b;">
+                    <span>🔄</span> Reiniciar
+                  </button>
+                  <button class="liquid-action-pill" id="btn-poweroff-device" style="border-color: rgba(239, 68, 68, 0.55); color: #ef4444;">
+                    <span>⏻</span> Apagar
+                  </button>
+                </div>
+              </div>
+            </div>
+        </div>
+
+        <div class="info-telemetry-panel" id="info-telemetry-panel">
+          <div class="info-telemetry-grid">
+            <!-- ENERGÍA SOLAR Y BATERÍAS -->
+            <div class="dashboard-section" id="section-energy">
+              <div class="section-title">
+                <span class="section-icon">⚡</span>
+                <h3>Energía Solar</h3>
+              </div>
+              <div class="liquid-grid info-single-grid" id="energy-grid"></div>
+            </div>
+
+            <!-- CLIMA Y SENSORES -->
+            <div class="dashboard-section" id="section-climate">
+              <div class="section-title">
+                <span class="section-icon">🌡️</span>
+                <h3>Clima & Sensores</h3>
+              </div>
+              <div class="liquid-grid" id="climate-grid"></div>
+            </div>
+
+            <!-- SEGURIDAD Y ACCESO -->
+            <div class="dashboard-section" id="section-security">
+              <div class="section-title">
+                <span class="section-icon">🛡️</span>
+                <h3>Seguridad & Acceso</h3>
+              </div>
+              <div class="liquid-grid" id="security-grid"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dashboard-col dashboard-col-controls">
+          <!-- VISTA POR HABITACIONES -->
+          <div class="dashboard-section" id="section-rooms">
+            <div id="rooms-container" class="rooms-mosaic-columns"></div>
+          </div>
+
+          <!-- VISTA COMPACTA -->
+          <div class="dashboard-section" id="section-compact" style="display:none;">
+            <div class="section-title">
+              <span class="section-icon">⭐</span>
+              <h3>Controles Rápidos</h3>
+            </div>
+            <div class="liquid-grid" id="compact-grid"></div>
+          </div>
+
+          <!-- VISTA POR TIPO: ILUMINACIÓN INTELIGENTE -->
+          <div class="dashboard-section" id="section-lights">
+            <div class="section-title">
+              <span class="section-icon">💡</span>
+              <h3>Iluminación Inteligente</h3>
+            </div>
+            <div class="liquid-grid" id="lights-grid"></div>
+          </div>
+
+          <!-- VISTA POR TIPO: AIRE ACONDICIONADO -->
+          <div class="dashboard-section" id="section-ac">
+            <div class="section-title">
+              <span class="section-icon">❄️</span>
+              <h3>Climatización & Aire Acondicionado</h3>
+            </div>
+            <div class="liquid-grid" id="ac-grid"></div>
+          </div>
+
+          <!-- VISTA POR TIPO: ENCHUFES Y ELECTRODOMÉSTICOS -->
+          <div class="dashboard-section" id="section-plugs">
+            <div class="section-title">
+              <span class="section-icon">🔌</span>
+              <h3>Tomas de Corriente & Equipos</h3>
+            </div>
+            <div class="liquid-grid" id="plugs-grid"></div>
+          </div>
+
+          <!-- VISTA POR TIPO: DISPOSITIVOS XIAOMI -->
+          <div class="dashboard-section" id="section-xiaomi">
+            <div class="section-title">
+              <span class="section-icon">🌀</span>
+              <h3>Dispositivos Xiaomi (Local Wi-Fi)</h3>
+            </div>
+            <div class="liquid-grid" id="xiaomi-grid"></div>
+          </div>
+
+          <!-- VISTA POR TIPO: MANDOS INFRARROJOS -->
+          <div class="dashboard-section" id="section-ir">
+            <div class="section-title">
+              <span class="section-icon">📡</span>
+              <h3>Mandos Infrarrojos (TV & Luz IR)</h3>
+            </div>
+            <div class="liquid-grid" id="ir-grid"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Family Message Modal (Liquid Glass) -->
+  <div id="message-modal" class="hidden">
+    <div class="liquid-message-card">
+      <div class="message-header">
+        <span class="message-avatar">💬</span>
+        <div>
+          <h3 id="message-sender">Mensaje de Familia</h3>
+          <span id="message-time">Ahora</span>
+        </div>
+      </div>
+      <div class="message-body" id="message-text">
+        Cargando mensaje...
+      </div>
+      <button class="liquid-btn-primary" id="message-dismiss-btn">Entendido / Cerrar</button>
+    </div>
+  </div>
+
+  <!-- Real Doorbell Alert Modal (Liquid Glass) -->
+  <div id="doorbell-modal" class="hidden">
+    <div class="liquid-doorbell-card">
+      <div class="doorbell-header">
+        <div class="pulsing-dot"></div>
+        <h2 id="doorbell-title">¡Alguien está en la puerta!</h2>
+        <span id="doorbell-countdown">45s</span>
+      </div>
+      
+      <div class="doorbell-video-frame">
+        <div id="doorbell-placeholder" class="video-placeholder">
+          <svg viewBox="0 0 24 24" width="64" height="64" fill="currentColor">
+            <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
+          </svg>
+          <p>Videoportero Exterior Tuya</p>
+        </div>
+        <iframe id="doorbell-stream" class="hidden" allow="autoplay; fullscreen"></iframe>
+      </div>
+
+      <div class="doorbell-actions">
+        <button class="liquid-btn-primary" id="doorbell-dismiss-btn">Cerrar Alerta</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Touchscreen Hardware Diagnostic Overlay -->
+  <div id="touch-test-overlay" class="hidden" style="position:fixed; inset:0; z-index:99990; background:rgba(8,14,26,0.88); display:none; flex-direction:column; align-items:center; justify-content:center; user-select:none;">
+    <canvas id="touch-test-canvas" style="position:absolute; inset:0; width:100%; height:100%; pointer-events:none;"></canvas>
+    <div style="position:relative; z-index:2; text-align:center; padding:1.5rem 2rem; border-radius:24px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.22); color:#fff; max-width:440px;">
+      <h3 style="margin:0 0 0.5rem 0; font-size:1.25rem;">🧪 Diagnóstico Táctil ASUS</h3>
+      <p style="margin:0 0 0.75rem 0; font-size:0.9rem; opacity:0.85;">Toca o desliza el dedo por toda la pantalla (especialmente esquinas y bordes). Cada punto detectado se pintará en cian.</p>
+      <div id="touch-test-coords" style="font-family:monospace; font-size:0.95rem; color:#00e5ff; margin-bottom:1rem;">Esperando toque...</div>
+      <div style="display:flex; gap:0.75rem; justify-content:center;">
+        <button id="btn-touch-test-clear" class="liquid-action-pill" style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); cursor:pointer;">🧹 Limpiar</button>
+        <button id="btn-touch-test-close" class="liquid-action-pill" style="background:rgba(0,229,255,0.25); color:#fff; border:1px solid #00e5ff; cursor:pointer;">✕ Cerrar Test</button>
+      </div>
+    </div>
+  </div>
+
+
+
+  <!-- ======================================================== -->
+  <!-- MODAL DE CÁMARAS EN DIRECTO (CONEXIÓN AUTOMÁTICA)        -->
+  <!-- ======================================================== -->
+  <div id="cameras-modal" class="hidden domos-modal-backdrop" style="position:fixed; inset:0; z-index:9000; display:none; align-items:center; justify-content:center; padding:1.25rem;">
+    <div class="liquid-drawer-panel" style="width:100%; max-width:1280px; max-height:92vh; display:flex; flex-direction:column;">
+      <div class="liquid-panel-header">
+        <div class="header-titles">
+          <div class="brand-row">
+            <span class="brand-badge">📹 VIDEOVIGILANCIA EN DIRECTO</span>
+            <span class="device-count-badge" id="cameras-modal-status">Conectando automáticamente...</span>
+          </div>
+          <h2>Cámaras del Hogar</h2>
+        </div>
+        <div class="header-actions-group">
+          <button class="liquid-action-pill" id="btn-modal-reconnect-cams" onclick="connectAllCameras()" style="cursor:pointer;">🔄 Reconectar Todas</button>
+          <button class="liquid-action-pill domos-close-btn" id="btn-cameras-modal-close" style="cursor:pointer;">✕ Cerrar Cámaras</button>
+        </div>
+      </div>
+      <div class="liquid-panel-body" style="overflow-y:auto;">
+        <div class="liquid-cameras-grid" id="cameras-grid">
+          <!-- Dynamically populated with live video monitors -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- PANTALLA COMPLETA DE CÁMARA / VIDEOPORTERO ACTIVO        -->
+  <!-- ======================================================== -->
+  <div id="camera-fullscreen-modal" class="hidden" style="position:fixed; inset:0; z-index:9500; display:none; flex-direction:column; background:#030712; color:#fff;">
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:0.75rem 1.25rem; background:rgba(15,23,42,0.72); border-bottom:1px solid rgba(255,255,255,0.12);">
+      <div style="display:flex; align-items:center; gap:0.75rem;">
+        <span class="live-dot" style="width:10px; height:10px; border-radius:50%; background:#ef4444; display:inline-block;"></span>
+        <h3 id="cam-fs-title" style="margin:0; font-size:1.1rem;">Cámara en Directo</h3>
+        <span id="cam-fs-badge" style="font-size:0.75rem; padding:3px 10px; border-radius:999px; background:rgba(0,229,255,0.18); color:#00e5ff; border:1px solid rgba(0,229,255,0.4);">EN DIRECTO</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:0.65rem;">
+        <button id="btn-cam-fs-vol-down" class="liquid-action-pill" style="cursor:pointer; background:rgba(255,255,255,0.12); border-color:rgba(255,255,255,0.25); color:#fff;">🔉 -</button>
+        <button id="btn-cam-fs-vol-up" class="liquid-action-pill" style="cursor:pointer; background:rgba(255,255,255,0.12); border-color:rgba(255,255,255,0.25); color:#fff;">🔊 +</button>
+        <button id="btn-cam-fs-audio" class="liquid-action-pill" style="cursor:pointer; background:rgba(16,185,129,0.22); border-color:#10b981; color:#fff;">🔊 Audio Activo</button>
+        <button id="btn-cam-fs-close" class="liquid-action-pill" style="cursor:pointer; background:rgba(239,68,68,0.28); border-color:#ef4444; color:#fff; font-weight:700;">✕ Cerrar</button>
+      </div>
+    </div>
+    <div id="cam-fs-viewport" style="flex:1; position:relative; display:flex; align-items:center; justify-content:center; background:#000; overflow:hidden;">
+      <p style="color:var(--modal-text-muted);">Conectando señal en directo...</p>
+    </div>
+  </div>
+
+  <!-- Volume OSD Overlay -->
+  <div id="volume-osd" style="position:fixed; top:28px; left:50%; transform:translateX(-50%) scale(0.92); opacity:0; pointer-events:none; z-index:99995; min-width:260px; max-width:340px; padding:12px 18px; border-radius:20px; background:rgba(15,23,42,0.88); border:1px solid rgba(255,255,255,0.18); box-shadow:0 16px 40px rgba(0,0,0,0.45); color:#f8fafc; transition:opacity 0.18s ease, transform 0.18s ease;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px;">
+      <div style="display:flex; align-items:center; gap:8px; font-weight:600; font-size:0.95rem;">
+        <span id="volume-osd-icon" style="font-size:1.2rem;">🔊</span>
+        <span>Volumen</span>
+      </div>
+      <span id="volume-osd-text" style="font-weight:700; font-variant-numeric:tabular-nums; color:#00e5ff; font-size:0.95rem;">--%</span>
+    </div>
+    <div style="width:100%; height:8px; border-radius:999px; background:rgba(255,255,255,0.14); overflow:hidden;">
+      <div id="volume-osd-bar" style="width:0%; height:100%; border-radius:999px; background:linear-gradient(90deg, #00e5ff, #10b981); transition:width 0.14s ease;"></div>
+    </div>
+  </div>
+
+  <!-- Weather Forecast Modal -->
+  <div id="weather-modal" class="hidden domos-modal-backdrop" style="position:fixed; inset:0; z-index:9100; display:none; align-items:center; justify-content:center; padding:1.5rem;">
+    <div class="domos-modal-card" style="width:100%; max-width:720px; border-radius:26px; box-shadow:0 24px 60px rgba(0,0,0,0.35); overflow:hidden;">
+      <div class="domos-modal-header" style="display:flex; align-items:center; justify-content:space-between; padding:1.1rem 1.4rem;">
+        <div>
+          <h3 style="margin:0; font-size:1.25rem; display:flex; align-items:center; gap:0.5rem;">
+            <span id="wmodal-icon">☀️</span>
+            <span>Previsión Meteorológica</span>
+          </h3>
+          <div id="wmodal-location" style="font-size:0.88rem; color:var(--modal-text-muted); margin-top:2px;">📍 Rincón de la Victoria, Málaga</div>
+        </div>
+        <button id="btn-weather-modal-close" class="liquid-action-pill domos-close-btn" style="cursor:pointer;">✕ Cerrar</button>
+      </div>
+      <div style="padding:1.25rem 1.4rem;">
+        <div style="display:flex; gap:0.5rem; margin-bottom:0.85rem; flex-wrap:wrap;">
+          <input id="wmodal-city-input" class="domos-modal-input" type="text" placeholder="Cambiar localidad (ej. Rincón de la Victoria, Málaga)..." style="flex:1; min-width:200px; padding:0.55rem 0.9rem; border-radius:14px; font-size:0.9rem; outline:none;" />
+          <button id="wmodal-city-search-btn" class="liquid-action-pill" style="cursor:pointer; background:rgba(14,165,233,0.25); border-color:rgba(56,189,248,0.5); color:#fff; font-weight:600;">🔍 Buscar</button>
+        </div>
+        <div id="wmodal-city-results" style="display:none; flex-wrap:wrap; gap:0.45rem; margin-bottom:0.9rem;"></div>
+        <div id="wmodal-current" class="domos-modal-subcard" style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:1rem; padding:1rem 1.25rem; border-radius:18px; margin-bottom:1.1rem;"></div>
+        <div id="wmodal-forecast-days" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:0.75rem;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Photo Source Modal -->
+  <div id="photo-source-modal" class="hidden domos-modal-backdrop" style="position:fixed; inset:0; z-index:9150; display:none; align-items:center; justify-content:center; padding:1.5rem;">
+    <div class="domos-modal-card" style="width:100%; max-width:520px; border-radius:26px; box-shadow:0 24px 60px rgba(0,0,0,0.45); overflow:hidden;">
+      <div class="domos-modal-header" style="display:flex; align-items:center; justify-content:space-between; padding:1.05rem 1.35rem;">
+        <h3 style="margin:0; font-size:1.15rem;">🌄 Origen de Fotos del Carrusel</h3>
+        <button id="btn-photo-modal-close" class="liquid-action-pill domos-close-btn" style="cursor:pointer;">✕ Cerrar</button>
+      </div>
+      <div style="padding:1.2rem 1.35rem; display:flex; flex-direction:column; gap:1rem;">
+        <div style="display:flex; flex-direction:column; gap:0.55rem;">
+          <label style="font-size:0.85rem; color:var(--modal-text-muted); font-weight:600;">Modo de reproducción</label>
+          <div style="display:grid; grid-template-columns:1fr; gap:0.5rem;">
+            <button class="liquid-action-pill photo-mode-opt" data-mode="mixed" style="justify-content:flex-start; padding:0.75rem 1rem; font-size:0.95rem; cursor:pointer; text-align:left;">🔀 Híbrido (Mixto: Fotos SD + Paisajes Internet)</button>
+            <button class="liquid-action-pill photo-mode-opt" data-mode="online" style="justify-content:flex-start; padding:0.75rem 1rem; font-size:0.95rem; cursor:pointer; text-align:left;">🌄 Dedicado: Paisajes HD de Internet</button>
+            <button class="liquid-action-pill photo-mode-opt" data-mode="sd" style="justify-content:flex-start; padding:0.75rem 1rem; font-size:0.95rem; cursor:pointer; text-align:left;">📁 Dedicado: Tarjeta SD (Fotos Personales)</button>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:0.45rem;">
+          <label for="modal-photo-folder-select" style="font-size:0.85rem; color:var(--modal-text-muted); font-weight:600;">Carpeta de origen (Tarjeta SD)</label>
+          <select id="modal-photo-folder-select" class="liquid-select" style="width:100%; padding:0.65rem 0.9rem; font-size:0.95rem; background:var(--modal-input-bg); color:var(--modal-text); border:1px solid var(--modal-input-border); border-radius:14px;">
+            <option value="Imagenes">Cargando carpetas...</option>
+          </select>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:0.45rem;">
+          <label for="modal-slide-interval-select" style="font-size:0.85rem; color:var(--modal-text-muted); font-weight:600;">Tiempo por foto</label>
+          <select id="modal-slide-interval-select" class="liquid-select" style="width:100%; padding:0.65rem 0.9rem; font-size:0.95rem; background:var(--modal-input-bg); color:var(--modal-text); border:1px solid var(--modal-input-border); border-radius:14px;">
+            <option value="15">15 segundos</option>
+            <option value="30">30 segundos</option>
+            <option value="60" selected>1 minuto (Por defecto)</option>
+            <option value="120">2 minutos</option>
+            <option value="300">5 minutos</option>
+          </select>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:0.45rem;">
+          <label for="modal-slide-transition-select" style="font-size:0.85rem; color:var(--modal-text-muted); font-weight:600;">Efecto de transición</label>
+          <select id="modal-slide-transition-select" class="liquid-select" style="width:100%; padding:0.65rem 0.9rem; font-size:0.95rem; background:var(--modal-input-bg); color:var(--modal-text); border:1px solid var(--modal-input-border); border-radius:14px;">
+            <option value="auto">✨ Dinámico (Luz: Blanco / Oscura: Negro)</option>
+            <option value="blur">🫧 Desenfoque Glassmorphism (Bokeh a nitidez)</option>
+            <option value="black">🌙 Fundido a Negro (Cinematográfico)</option>
+            <option value="white">☀️ Fundido a Blanco (Luminoso etéreo)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Solar Panels Detail Modal -->
+  <div id="solar-modal" class="hidden domos-modal-backdrop" style="position:fixed; inset:0; z-index:9160; display:none; align-items:center; justify-content:center; padding:1.5rem;">
+    <div class="domos-modal-card" style="width:100%; max-width:620px; border-radius:26px; box-shadow:0 24px 60px rgba(0,0,0,0.45); overflow:hidden;">
+      <div class="domos-modal-header" style="display:flex; align-items:center; justify-content:space-between; padding:1.05rem 1.35rem;">
+        <h3 style="margin:0; font-size:1.2rem;">⚡ Placas Solares y Energía</h3>
+        <button id="btn-solar-modal-close" class="liquid-action-pill domos-close-btn" style="cursor:pointer;">✕ Cerrar</button>
+      </div>
+      <div id="solar-modal-body" style="padding:1.25rem 1.35rem; display:flex; flex-direction:column; gap:1rem;">
+        <p style="color:var(--modal-text-muted); margin:0;">Cargando telemetría solar...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Battery Health & Energy Lifecycle Modal -->
+  <div id="battery-modal" class="hidden domos-modal-backdrop" style="position:fixed; inset:0; z-index:9162; display:none; align-items:center; justify-content:center; padding:1.25rem;">
+    <div class="domos-modal-card" style="width:100%; max-width:680px; max-height:88vh; display:flex; flex-direction:column; border-radius:26px; box-shadow:0 24px 60px rgba(0,0,0,0.5); overflow:hidden; background:var(--modal-bg); border:1px solid var(--modal-input-border);">
+      <div class="domos-modal-header" style="display:flex; align-items:center; justify-content:space-between; padding:1.1rem 1.4rem; border-bottom:1px solid var(--modal-subcard-border);">
+        <div style="display:flex; align-items:center; gap:0.65rem;">
+          <h3 style="margin:0; font-size:1.2rem; display:flex; align-items:center; gap:0.45rem;">⚡ Energía y Salud de Domos</h3>
+          <span id="bat-modal-status-badge" style="font-size:0.75rem; font-weight:700; padding:0.25rem 0.6rem; border-radius:999px; background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3);">Descargando</span>
+        </div>
+        <button id="btn-battery-modal-close" class="liquid-action-pill domos-close-btn" style="cursor:pointer;">✕ Cerrar</button>
+      </div>
+      <div id="battery-modal-body" style="padding:1.25rem 1.4rem; overflow-y:auto; display:flex; flex-direction:column; gap:1.15rem;">
+        <!-- Top Metrics Grid -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(135px, 1fr)); gap:0.75rem;">
+          <div class="domos-modal-subcard" style="padding:0.85rem 1rem; border-radius:16px;">
+            <div style="font-size:0.75rem; color:var(--modal-text-muted); font-weight:600; text-transform:uppercase;">Nivel Batería</div>
+            <div id="bat-modal-level" style="font-size:1.6rem; font-weight:800; color:var(--modal-text); margin-top:2px;">--%</div>
+            <div style="font-size:0.75rem; color:var(--modal-text-muted);">Régimen 30% - 70%</div>
+          </div>
+          <div class="domos-modal-subcard" style="padding:0.85rem 1rem; border-radius:16px;">
+            <div style="font-size:0.75rem; color:var(--modal-text-muted); font-weight:600; text-transform:uppercase;">Salud de Celda</div>
+            <div id="bat-modal-health" style="font-size:1.6rem; font-weight:800; color:#10b981; margin-top:2px;">--%</div>
+            <div id="bat-modal-mah" style="font-size:0.75rem; color:var(--modal-text-muted);">-- / 5.000 mAh</div>
+          </div>
+          <div class="domos-modal-subcard" style="padding:0.85rem 1rem; border-radius:16px;">
+            <div style="font-size:0.75rem; color:var(--modal-text-muted); font-weight:600; text-transform:uppercase;">Consumo en Vivo</div>
+            <div id="bat-modal-power" style="font-size:1.6rem; font-weight:800; color:#38bdf8; margin-top:2px;">-- W</div>
+            <div id="bat-modal-vi" style="font-size:0.75rem; color:var(--modal-text-muted);">-- V · -- mA</div>
+          </div>
+          <div class="domos-modal-subcard" style="padding:0.85rem 1rem; border-radius:16px;">
+            <div style="font-size:0.75rem; color:var(--modal-text-muted); font-weight:600; text-transform:uppercase;">Ciclos Totales</div>
+            <div id="bat-modal-cycles" style="font-size:1.6rem; font-weight:800; color:var(--modal-text); margin-top:2px;">--</div>
+            <div style="font-size:0.75rem; color:var(--modal-text-muted);">Chip Intel SR Real</div>
+          </div>
+        </div>
+
+        <!-- Health Progress Bar & Diagnostics -->
+        <div class="domos-modal-subcard" style="padding:1rem 1.15rem; border-radius:18px; display:flex; flex-direction:column; gap:0.6rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:0.85rem; font-weight:700;">Estado Químico y Prevención de Hinchado</span>
+            <span id="bat-modal-diag-badge" style="font-size:0.75rem; font-weight:600; color:#10b981;">Estable y Segura</span>
+          </div>
+          <div style="width:100%; height:10px; background:rgba(255,255,255,0.08); border-radius:999px; overflow:hidden;">
+            <div id="bat-modal-health-bar" style="height:100%; width:50%; background:linear-gradient(90deg, #10b981, #38bdf8); border-radius:999px; transition:width 0.6s ease;"></div>
+          </div>
+          <p id="bat-modal-diag-text" style="margin:0; font-size:0.8rem; color:var(--modal-text-muted); line-height:1.4;">
+            Cargando diagnóstico químico...
+          </p>
+        </div>
+
+        <!-- Autonomy Benchmarks -->
+        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:0.65rem;">
+          <div class="domos-modal-subcard" style="padding:0.8rem 0.95rem; border-radius:16px; text-align:center;">
+            <div style="font-size:1.15rem; margin-bottom:2px;">☀️</div>
+            <div style="font-size:0.75rem; color:var(--modal-text-muted); font-weight:600;">Descarga de Día</div>
+            <div id="bat-modal-avg-day" style="font-size:1.15rem; font-weight:700; color:var(--modal-text); margin-top:2px;">~1h 15m</div>
+            <div style="font-size:0.7rem; color:var(--modal-text-muted);">Pantalla y carrusel</div>
+          </div>
+          <div class="domos-modal-subcard" style="padding:0.8rem 0.95rem; border-radius:16px; text-align:center;">
+            <div style="font-size:1.15rem; margin-bottom:2px;">🌙</div>
+            <div style="font-size:0.75rem; color:var(--modal-text-muted); font-weight:600;">Descarga de Noche</div>
+            <div id="bat-modal-avg-night" style="font-size:1.15rem; font-weight:700; color:#a78bfa; margin-top:2px;">~2h 55m</div>
+            <div style="font-size:0.7rem; color:var(--modal-text-muted);">Pantalla apagada</div>
+          </div>
+          <div class="domos-modal-subcard" style="padding:0.8rem 0.95rem; border-radius:16px; text-align:center;">
+            <div style="font-size:1.15rem; margin-bottom:2px;">⚡</div>
+            <div style="font-size:0.75rem; color:var(--modal-text-muted); font-weight:600;">Tiempo de Carga</div>
+            <div id="bat-modal-avg-charge" style="font-size:1.15rem; font-weight:700; color:#fbbf24; margin-top:2px;">~36 min</div>
+            <div style="font-size:0.7rem; color:var(--modal-text-muted);">De 30% a 70%</div>
+          </div>
+        </div>
+
+        <!-- History Chart (SVG) -->
+        <div class="domos-modal-subcard" style="padding:1rem 1.15rem; border-radius:18px; display:flex; flex-direction:column; gap:0.6rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:0.85rem; font-weight:700;">Historial de Ciclos (Duración en minutos)</span>
+            <div style="display:flex; gap:0.6rem; font-size:0.75rem;">
+              <span style="color:#fbbf24;">⚡ Carga</span>
+              <span style="color:#10b981;">☀️ Día</span>
+              <span style="color:#a78bfa;">🌙 Noche</span>
+            </div>
+          </div>
+          <div id="bat-modal-chart" style="width:100%; height:130px; display:flex; align-items:flex-end; gap:6px; overflow-x:auto; padding:0.5rem 0 0.2rem 0;">
+            <!-- SVG Bars injected dynamically -->
+          </div>
+        </div>
+
+        <!-- Recent Cycles Table -->
+        <div class="domos-modal-subcard" style="padding:1rem 1.15rem; border-radius:18px; display:flex; flex-direction:column; gap:0.5rem;">
+          <span style="font-size:0.85rem; font-weight:700;">Últimos ciclos registrados</span>
+          <div id="bat-modal-cycles-list" style="display:flex; flex-direction:column; gap:0.4rem; max-height:160px; overflow-y:auto;">
+            <!-- Injected dynamically -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AdGuard Home Modal -->
+  <div id="adguard-modal" class="hidden domos-modal-backdrop" style="position:fixed; inset:0; z-index:9165; display:none; align-items:center; justify-content:center; padding:1.5rem;">
+    <div class="domos-modal-card" style="width:100%; max-width:680px; max-height:86vh; display:flex; flex-direction:column; border-radius:26px; box-shadow:0 24px 60px rgba(0,0,0,0.45); overflow:hidden;">
+      <div class="domos-modal-header" style="display:flex; align-items:center; justify-content:space-between; padding:1.05rem 1.35rem;">
+        <h3 style="margin:0; font-size:1.2rem;">🛡️ AdGuard Home · Monitor DNS</h3>
+        <button type="button" id="btn-adguard-modal-close" class="liquid-action-pill domos-close-btn" style="cursor:pointer;">✕ Cerrar</button>
+      </div>
+      <div id="adguard-modal-body" style="padding:1.15rem 1.35rem; overflow-y:auto; display:flex; flex-direction:column; gap:0.9rem;">
+        <p style="color:var(--modal-text-muted); margin:0;">Cargando estadísticas de AdGuard Home...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fullscreen Monthly Calendar Modal -->
+  <div id="calendar-modal" class="hidden domos-modal-backdrop" style="position:fixed; inset:0; z-index:9175; display:none; align-items:center; justify-content:center; padding:0.75rem;">
+    <div class="domos-modal-card cal-modal-card">
+      <div class="domos-modal-header cal-modal-header">
+        <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+          <h3 style="margin:0; font-size:1.15rem;">📅 Calendario</h3>
+          <div style="display:flex; align-items:center; gap:0.4rem;">
+            <button type="button" id="cal-prev-month" class="liquid-action-pill" style="cursor:pointer; padding:0.35rem 0.75rem;">◀</button>
+            <span id="cal-month-label" style="min-width:165px; text-align:center; font-size:1.05rem; font-weight:800; text-transform:capitalize;">--</span>
+            <button type="button" id="cal-next-month" class="liquid-action-pill" style="cursor:pointer; padding:0.35rem 0.75rem;">▶</button>
+            <button type="button" id="cal-today-btn" class="liquid-action-pill" style="cursor:pointer; padding:0.35rem 0.75rem;">Hoy</button>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap;">
+          <button type="button" id="cal-btn-toggle-add" class="liquid-action-pill" style="cursor:pointer;">➕ Hito</button>
+          <button type="button" id="cal-btn-toggle-ics" class="liquid-action-pill" style="cursor:pointer;">🔗 Sincronizar .ics</button>
+          <button type="button" id="btn-calendar-modal-close" class="liquid-action-pill domos-close-btn" style="cursor:pointer;">✕ Cerrar</button>
+        </div>
+      </div>
+
+      <!-- Collapsible Add Event Bar -->
+      <div id="cal-add-panel" class="cal-subbar hidden">
+        <input type="text" id="cal-new-title-input" class="room-name-input" placeholder="Toca para escribir hito/recordatorio..." readonly />
+        <input type="date" id="cal-new-date-input" class="room-emoji-select" />
+        <input type="time" id="cal-new-time-input" class="room-emoji-select" value="09:00" />
+        <button type="button" id="cal-save-event-btn" class="liquid-action-pill" style="cursor:pointer; font-weight:700;">💾 Guardar</button>
+      </div>
+
+      <!-- Collapsible ICS Sync Bar -->
+      <div id="cal-ics-panel" class="cal-subbar hidden" style="flex-direction:column; align-items:stretch;">
+        <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+          <input type="text" id="cal-ics-name-input" class="room-name-input" style="max-width:190px;" placeholder="Nombre (ej. Google)" readonly />
+          <input type="text" id="cal-ics-url-input" class="room-name-input" placeholder="Pega aquí la URL privada .ics..." />
+          <button type="button" id="cal-add-ics-btn" class="liquid-action-pill" style="cursor:pointer; font-weight:700;">➕ Añadir Calendario</button>
+        </div>
+        <div id="cal-ics-sources-list" class="custom-rooms-list"></div>
+      </div>
+
+      <!-- 7-Column Full-Height Month Grid -->
+      <div class="cal-grid-wrap">
+        <div class="cal-grid-weekdays">
+          <div>Lun</div><div>Mar</div><div>Mié</div><div>Jue</div><div>Vie</div><div>Sáb</div><div>Dom</div>
+        </div>
+        <div id="cal-grid-days" class="cal-grid-days"></div>
+      </div>
+
+      <!-- Selected Day Details Footer -->
+      <div id="cal-day-detail-bar" class="cal-day-detail-bar"></div>
+    </div>
+  </div>
+
+  <!-- Radio Modal -->
+  <audio id="radio-audio-player" preload="none"></audio>
+  <div id="radio-modal" class="hidden domos-modal-backdrop" style="position:fixed; inset:0; z-index:9170; display:none; align-items:center; justify-content:center; padding:1.5rem;">
+    <div class="domos-modal-card" style="width:100%; max-width:740px; max-height:88vh; display:flex; flex-direction:column; border-radius:26px; box-shadow:0 24px 60px rgba(0,0,0,0.45); overflow:hidden;">
+      <div class="domos-modal-header" style="display:flex; align-items:center; justify-content:space-between; gap:0.75rem; padding:1.05rem 1.35rem;">
+        <div style="min-width:0;">
+          <h3 style="margin:0; font-size:1.22rem;">📻 Radio Nacional en Directo</h3>
+          <div id="radio-now-playing" class="domos-modal-muted" style="font-size:0.86rem; margin-top:2px;">Selecciona una emisora para escuchar</div>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.45rem; flex-shrink:0;">
+          <button id="btn-radio-vol-down" class="liquid-action-pill radio-header-btn neutral">🔉 -</button>
+          <button id="btn-radio-vol-up" class="liquid-action-pill radio-header-btn neutral">🔊 +</button>
+          <button id="btn-radio-stop" class="liquid-action-pill radio-header-btn stop">⏹ Parar</button>
+          <button id="btn-radio-modal-close" class="liquid-action-pill radio-header-btn close">✕ Cerrar</button>
+        </div>
+      </div>
+      <div id="radio-vumeter" style="padding:0.6rem 1.35rem 0.25rem; display:flex; align-items:flex-end; gap:5px; height:48px;"></div>
+      <div id="radio-stations-grid" style="padding:1.15rem 1.35rem; overflow-y:auto; display:grid; grid-template-columns:repeat(auto-fill, minmax(195px, 1fr)); gap:0.75rem;"></div>
+    </div>
+  </div>
+
+  <!-- Volume Safety Limit Modal (70% Protection) -->
+  <div id="volume-safety-modal" class="hidden domos-modal-backdrop" style="position:fixed; inset:0; z-index:9600; display:none; align-items:center; justify-content:center; padding:1.25rem;">
+    <div class="domos-modal-card" style="width:100%; max-width:520px; border-radius:26px; padding:1.5rem 1.65rem; display:flex; flex-direction:column; gap:1.15rem; box-shadow:0 24px 60px rgba(0,0,0,0.55); border:1px solid rgba(245,158,11,0.35); background:var(--modal-bg);">
+      <div style="display:flex; align-items:center; gap:0.95rem;">
+        <div style="width:52px; height:52px; border-radius:16px; background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); display:flex; align-items:center; justify-content:center; font-size:1.85rem; flex-shrink:0;">
+          ⚠️
+        </div>
+        <div style="min-width:0;">
+          <h3 style="margin:0; font-size:1.2rem; font-weight:700; color:var(--modal-text);">Límite Seguro de Volumen (70%)</h3>
+          <div style="font-size:0.86rem; color:var(--modal-text-muted); margin-top:2px;">Protección acústica contra distorsión y fatiga</div>
+        </div>
+      </div>
+
+      <div style="font-size:0.94rem; line-height:1.5; color:var(--modal-text); background:rgba(255,255,255,0.04); border:1px solid var(--modal-subcard-border); padding:1rem 1.15rem; border-radius:16px;">
+        A partir del <strong>70% de potencia</strong> los altavoces internos de la tablet entran en distorsión y pueden rasgarse o dañarse con el tiempo.<br><br>
+        ¿Deseas desbloquear el volumen alto? <span style="color:#f59e0b; font-weight:600;">Recomendado únicamente al utilizar la barra de sonido o altavoces externos</span> conectados por cable minijack.
+      </div>
+
+      <div style="display:flex; gap:0.75rem; justify-content:flex-end; align-items:center; margin-top:0.35rem;">
+        <button id="btn-vol-safety-keep" class="liquid-action-pill neutral" style="padding:0.75rem 1.25rem; font-weight:600; cursor:pointer;">
+          Mantener al 70% (Seguro)
+        </button>
+        <button id="btn-vol-safety-unlock" class="liquid-action-pill stop" style="padding:0.75rem 1.25rem; font-weight:700; background:rgba(245,158,11,0.22); border-color:#f59e0b; color:#fbbf24; cursor:pointer;">
+          Desbloquear (+70%)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- System Incidents & Alerts Modal (Liquid Glass) -->
+  <div id="incidents-modal" class="hidden domos-modal-backdrop" style="position:fixed; inset:0; z-index:9700; display:none; align-items:center; justify-content:center; padding:1.25rem;">
+    <div class="domos-modal-card" style="width:100%; max-width:620px; max-height:85vh; border-radius:26px; display:flex; flex-direction:column; box-shadow:0 24px 60px rgba(0,0,0,0.55); overflow:hidden; border:1px solid rgba(245,158,11,0.35); background:var(--modal-bg);">
+      <div class="domos-modal-header" style="display:flex; align-items:center; justify-content:space-between; padding:1.15rem 1.45rem; border-bottom:1px solid var(--modal-subcard-border);">
+        <div style="display:flex; align-items:center; gap:0.75rem;">
+          <div style="width:40px; height:40px; border-radius:12px; background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); display:flex; align-items:center; justify-content:center; font-size:1.45rem;">
+            ⚠️
+          </div>
+          <div>
+            <h3 style="margin:0; font-size:1.2rem; font-weight:700; color:var(--modal-text);">Centro de Incidencias y Avisos</h3>
+            <div id="incidents-modal-subtitle" style="font-size:0.84rem; color:var(--modal-text-muted); margin-top:2px;">Supervisión continua de sensores, batería y red</div>
+          </div>
+        </div>
+        <div style="display:flex; gap:0.5rem;">
+          <button id="btn-incidents-clear-all" class="liquid-action-pill neutral" style="font-size:0.85rem; padding:0.45rem 0.85rem; cursor:pointer;">Silenciar todo</button>
+          <button id="btn-incidents-close" class="liquid-action-pill close" style="font-size:0.85rem; padding:0.45rem 0.85rem; cursor:pointer;">✕ Cerrar</button>
+        </div>
+      </div>
+      <div id="incidents-list-container" style="padding:1.25rem 1.45rem; overflow-y:auto; display:flex; flex-direction:column; gap:0.85rem;">
+        <!-- Rendered dynamically by app.js -->
+      </div>
+    </div>
+  </div>
+
+  <script src="hls.min.js"></script>
+
+
+  <!-- BUILT-IN GLASS ON-SCREEN KEYBOARD -->
+  <div id="domos-osk-overlay" class="domos-osk-overlay hidden">
+    <div class="osk-panel" id="osk-panel">
+      <div class="osk-preview-bar">
+        <input type="text" id="osk-preview-input" class="osk-preview-input" placeholder="Escribe aquí..." readonly />
+        <button type="button" class="liquid-action-pill" id="osk-clear-btn">🧹</button>
+        <button type="button" class="liquid-action-pill" id="osk-cancel-btn">✕</button>
+      </div>
+      <div id="osk-keys-container"></div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

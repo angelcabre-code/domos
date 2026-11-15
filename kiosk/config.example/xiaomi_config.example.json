@@ -1,0 +1,11 @@
+{
+  "devices": [
+    {
+      "id": "vacuum_robot_1",
+      "name": "Robot Aspirador",
+      "type": "vacuum",
+      "ip": "192.168.1.150",
+      "token": "YOUR_MIIO_32_CHAR_TOKEN"
+    }
+  ]
+}

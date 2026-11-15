@@ -1,0 +1,12 @@
+# go2rtc configuration template
+streams:
+  doorbell:
+    - rtsp://admin:password@192.168.1.200:554/stream1#backchannel=0
+  hallway_camera:
+    - rtsp://admin:password@192.168.1.201:554/live/ch0
+
+api:
+  listen: "127.0.0.1:1984"
+
+webrtc:
+  listen: "127.0.0.1:8555"

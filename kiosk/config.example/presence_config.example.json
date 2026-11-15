@@ -1,0 +1,15 @@
+{
+  "location": {
+    "latitude": 40.4168,
+    "longitude": -3.7038,
+    "civil_twilight_threshold_deg": -6.0
+  },
+  "behavior": {
+    "wake_duration_seconds": 180,
+    "day_brightness": 75,
+    "night_active_brightness": 45,
+    "night_off_brightness": 0,
+    "fade_duration_seconds": 1.0
+  },
+  "devices": {}
+}
