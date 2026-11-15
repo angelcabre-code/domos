@@ -4,6 +4,7 @@ import urllib.parse
 import tuya_service
 import xiaomi_service
 import ewelink_service
+import climate_logger
 import time
 import datetime
 import os
@@ -233,6 +234,14 @@ async def api_system_battery():
         },
         "cycles": []
     }
+
+@app.get("/api/climate/history")
+async def api_climate_history(month: str = None, metric: str = "temperature"):
+    try:
+        data = await asyncio.to_thread(climate_logger.get_climate_history, month, metric)
+        return data
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.post("/api/brightness")
 async def api_set_brightness(request: Request):
@@ -1862,6 +1871,21 @@ async def api_adguard_toggle(request: Request):
     enabled = bool(data.get("enabled", True))
     await asyncio.to_thread(_adguard_request, "/control/protection", "POST", {"enabled": enabled})
     return await api_adguard_stats()
+
+async def monitor_climate_history_loop():
+    print("[CLIMATE_LOGGER] Climate telemetry logger started", flush=True)
+    await asyncio.to_thread(climate_logger.init_climate_history_store)
+    while True:
+        try:
+            clim_devs = tuya_service.service.get_structured_devices().get("climate", [])
+            await asyncio.to_thread(climate_logger.record_current_sample, clim_devs)
+        except Exception as e:
+            print(f"[CLIMATE_LOGGER_ERR] {e}", flush=True)
+        await asyncio.sleep(600)
+
+@app.on_event("startup")
+async def start_climate_logger():
+    asyncio.create_task(monitor_climate_history_loop())
 
 
 app.mount("/", StaticFiles(directory="/opt/domoskiosk/static", html=True), name="static")

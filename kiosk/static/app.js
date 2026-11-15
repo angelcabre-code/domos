@@ -271,7 +271,7 @@ function openWeatherModal() {
   }
 }
 
-document.getElementById("weather-btn")?.addEventListener("click", openWeatherModal);
+document.getElementById("weather-btn")?.addEventListener("click", () => openClimateHistoryModal());
 document.getElementById("btn-weather-modal-close")?.addEventListener("click", () => {
   const m = document.getElementById("weather-modal");
   if (m) { m.classList.add("hidden"); m.style.display = "none"; }
@@ -1113,13 +1113,16 @@ function renderHudIndicators() {
       const co2Val = c.state.co2 !== undefined ? ` · CO₂ ${c.state.co2}` : "";
       const icon = c.state.co2 !== undefined ? "🌬️" : "🌡️";
       return `
-        <div class="liquid-pill indoor-climate-pill" title="${c.name}">
+        <div class="liquid-pill indoor-climate-pill" title="Pulsa para ver evolución temporal del clima (${c.name})">
           <span>${icon}</span>
           <span class="indoor-climate-room">${room}:</span>
           <span class="indoor-climate-vals">${tVal} · ${hVal}${co2Val}</span>
         </div>
       `;
     }).join("");
+    indoorStack.querySelectorAll(".indoor-climate-pill").forEach(pill => {
+      pill.addEventListener("click", () => openClimateHistoryModal());
+    });
   }
 }
 
@@ -1510,6 +1513,13 @@ function renderClimateGrid() {
         toggleDeviceVisibility(card.getAttribute("data-devid"));
       });
     });
+  } else {
+    container.querySelectorAll(".climate-vertical-card").forEach(card => {
+      card.style.cursor = "pointer";
+      card.addEventListener("click", () => {
+        openClimateHistoryModal();
+      });
+    });
   }
 }
 
@@ -1583,6 +1593,13 @@ function renderEnergyGrid() {
     container.querySelectorAll(".liquid-card").forEach(card => {
       card.addEventListener("click", () => {
         toggleDeviceVisibility(card.getAttribute("data-devid"));
+      });
+    });
+  } else {
+    container.querySelectorAll(".climate-vertical-card").forEach(card => {
+      card.style.cursor = "pointer";
+      card.addEventListener("click", () => {
+        openClimateHistoryModal();
       });
     });
   }
@@ -2994,6 +3011,488 @@ document.getElementById("battery-modal")?.addEventListener("click", (e) => {
   }
 });
 
+// ========================================================
+// CLIMATE HISTORY & TEMPORAL EVOLUTION MODAL
+// ========================================================
+let climateHistoryCurrentMonth = null;
+let climateHistoryCurrentMetric = "temperature";
+let climateHistoryDisabledSensors = new Set();
+let climateHistoryData = null;
+let climateChartHoverIndex = null;
+
+async function openClimateHistoryModal(initialMetric = null) {
+  const modal = document.getElementById("climate-history-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  modal.style.display = "flex";
+
+  if (initialMetric) climateHistoryCurrentMetric = initialMetric;
+
+  if (!climateHistoryCurrentMonth) {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    climateHistoryCurrentMonth = `${y}-${m}`;
+  }
+
+  syncClimateMonthYearSelects();
+  await fetchAndRenderClimateHistory();
+}
+
+function closeClimateHistoryModal() {
+  const modal = document.getElementById("climate-history-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.style.display = "none";
+  climateChartHoverIndex = null;
+  const tip = document.getElementById("climate-chart-tooltip");
+  if (tip) tip.style.display = "none";
+}
+
+function syncClimateMonthYearSelects() {
+  if (!climateHistoryCurrentMonth) return;
+  const [y, m] = climateHistoryCurrentMonth.split("-");
+  const monthSel = document.getElementById("climate-month-select");
+  const yearSel = document.getElementById("climate-year-select");
+  if (monthSel) monthSel.value = String(parseInt(m, 10));
+  if (yearSel) yearSel.value = y;
+}
+
+async function fetchAndRenderClimateHistory() {
+  try {
+    const res = await fetch(`/api/climate/history?month=${climateHistoryCurrentMonth}&metric=${climateHistoryCurrentMetric}`);
+    if (res.ok) {
+      climateHistoryData = await res.json();
+      renderClimateHistoryUI();
+    }
+  } catch (err) {
+    console.error("Error loading climate history:", err);
+  }
+}
+
+function renderClimateHistoryUI() {
+  if (!climateHistoryData) return;
+
+  const data = climateHistoryData;
+  const unit = data.unit || "°C";
+  const sensors = data.sensors || [];
+  const points = data.points || [];
+
+  // 1. Metric buttons styling
+  document.querySelectorAll(".climate-metric-btn").forEach(btn => {
+    const m = btn.getAttribute("data-metric");
+    btn.classList.toggle("active", m === climateHistoryCurrentMetric);
+    if (m === climateHistoryCurrentMetric) {
+      btn.style.background = "rgba(6,182,212,0.22)";
+      btn.style.color = "#38bdf8";
+      btn.style.borderColor = "rgba(6,182,212,0.45)";
+    } else {
+      btn.style.background = "transparent";
+      btn.style.color = "var(--modal-text-muted)";
+      btn.style.borderColor = "transparent";
+    }
+  });
+
+  // 2. Active header badge
+  const monthNames = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const [yStr, mStr] = (data.selected_month || "2026-11").split("-");
+  const mName = monthNames[parseInt(mStr, 10)] || mStr;
+  const badgeEl = document.getElementById("climate-modal-active-badge");
+  if (badgeEl) {
+    const metricLabels = { temperature: "Temperatura", humidity: "Humedad Relativa", co2: "Calidad de Aire CO₂" };
+    badgeEl.textContent = `${mName} ${yStr} · ${metricLabels[climateHistoryCurrentMetric] || "Clima"}`;
+    badgeEl.style.background = "rgba(6, 182, 212, 0.28)";
+    badgeEl.style.color = "#f0f9ff";
+    badgeEl.style.borderColor = "rgba(6, 182, 212, 0.55)";
+  }
+
+  // 3. Sensor Legend (Interactive Toggles)
+  const legendEl = document.getElementById("climate-modal-sensor-legend");
+  if (legendEl) {
+    legendEl.innerHTML = sensors.map(s => {
+      const isDisabled = climateHistoryDisabledSensors.has(s.id);
+      const cur = s.stats?.current != null ? `${s.stats.current} ${unit}` : "--";
+      return `
+        <div class="climate-sensor-pill-toggle ${isDisabled ? 'disabled' : ''}" data-sensorid="${s.id}" style="border-color:${isDisabled ? 'transparent' : s.color}44;">
+          <span style="display:inline-block; width:9px; height:9px; border-radius:999px; background:${s.color}; box-shadow:0 0 6px ${s.color};"></span>
+          <span>${s.name}</span>
+          <span style="color:var(--modal-text-muted); font-weight:700;">(${cur})</span>
+        </div>
+      `;
+    }).join("");
+
+    legendEl.querySelectorAll(".climate-sensor-pill-toggle").forEach(pill => {
+      pill.addEventListener("click", () => {
+        const sid = pill.getAttribute("data-sensorid");
+        if (climateHistoryDisabledSensors.has(sid)) {
+          climateHistoryDisabledSensors.delete(sid);
+        } else {
+          const activeCount = sensors.filter(s => !climateHistoryDisabledSensors.has(s.id)).length;
+          if (activeCount > 1) {
+            climateHistoryDisabledSensors.add(sid);
+          }
+        }
+        renderClimateHistoryUI();
+      });
+    });
+  }
+
+  // 4. Render Canvas Chart
+  drawClimateChart();
+
+  // 5. Stat Cards
+  const statsEl = document.getElementById("climate-stats-grid");
+  if (statsEl) {
+    statsEl.innerHTML = sensors.map(s => {
+      const isDisabled = climateHistoryDisabledSensors.has(s.id);
+      const st = s.stats || {};
+      const avg = st.avg != null ? `${st.avg} ${unit}` : "--";
+      const max = st.max != null ? `${st.max} ${unit}` : "--";
+      const min = st.min != null ? `${st.min} ${unit}` : "--";
+      const cur = st.current != null ? `${st.current} ${unit}` : "--";
+
+      return `
+        <div class="domos-modal-subcard" style="padding:0.85rem 1rem; border-radius:16px; opacity:${isDisabled ? '0.4' : '1'}; transition:opacity 0.2s;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+            <div style="display:flex; align-items:center; gap:0.4rem; font-weight:700; font-size:0.82rem; color:${s.color};">
+              <span>${s.icon || '🌡️'}</span><span>${s.name}</span>
+            </div>
+            <span style="font-size:0.7rem; color:var(--modal-text-muted);">${s.room}</span>
+          </div>
+          <div style="font-size:1.4rem; font-weight:800; color:var(--modal-text); margin:2px 0;">${cur}</div>
+          <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; margin-top:6px; padding-top:6px; border-top:1px solid var(--modal-subcard-border); font-size:0.7rem;">
+            <div><span style="color:var(--modal-text-muted); display:block;">Media</span><b>${avg}</b></div>
+            <div><span style="color:var(--modal-text-muted); display:block;">Máx</span><b style="color:#f43f5e;">${max}</b></div>
+            <div><span style="color:var(--modal-text-muted); display:block;">Mín</span><b style="color:#38bdf8;">${min}</b></div>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  // 6. Comfort Diagnosis
+  const comfortTitle = document.getElementById("climate-comfort-title");
+  const comfortDesc = document.getElementById("climate-comfort-desc");
+  if (comfortTitle && comfortDesc) {
+    const indoorSensors = sensors.filter(s => s.id !== "exterior" && !climateHistoryDisabledSensors.has(s.id));
+    if (climateHistoryCurrentMetric === "temperature") {
+      const avgs = indoorSensors.map(s => s.stats?.avg).filter(v => v != null);
+      const overallAvg = avgs.length ? (avgs.reduce((a, b) => a + b, 0) / avgs.length) : 21.0;
+      if (overallAvg >= 20.0 && overallAvg <= 23.5) {
+        comfortTitle.textContent = "Confort Térmico Óptimo (20°C - 23.5°C)";
+        comfortDesc.textContent = `La temperatura media del hogar se sitúa en ${overallAvg.toFixed(1)}°C, con una oscilación suave y gran inercia térmica en todas las estancias. Ideal para ahorro energético y bienestar continuo.`;
+      } else if (overallAvg < 20.0) {
+        comfortTitle.textContent = "Ambiente Ligeramente Fresco";
+        comfortDesc.textContent = `La temperatura media interior es de ${overallAvg.toFixed(1)}°C. Las estancias se mantienen por debajo del umbral de confort estándar.`;
+      } else {
+        comfortTitle.textContent = "Ambiente Cálido";
+        comfortDesc.textContent = `La temperatura media interior es de ${overallAvg.toFixed(1)}°C.`;
+      }
+    } else if (climateHistoryCurrentMetric === "humidity") {
+      const hums = indoorSensors.map(s => s.stats?.avg).filter(v => v != null);
+      const overallHum = hums.length ? (hums.reduce((a, b) => a + b, 0) / hums.length) : 62;
+      if (overallHum >= 45 && overallHum <= 65) {
+        comfortTitle.textContent = "Humedad Relativa Saludable (45% - 65%)";
+        comfortDesc.textContent = `Nivel medio del ${overallHum.toFixed(0)}%. Previene sequedad en mucosas y evita condensaciones en paredes y ventanas.`;
+      } else if (overallHum > 65) {
+        comfortTitle.textContent = "Humedad Elevada (> 65%)";
+        comfortDesc.textContent = `Promedio del ${overallHum.toFixed(0)}%. Se recomienda activar el deshumidificador inteligente de Tuya para acelerar el secado del ambiente.`;
+      } else {
+        comfortTitle.textContent = "Ambiente Seco (< 45%)";
+        comfortDesc.textContent = `Promedio del ${overallHum.toFixed(0)}%. Podría ser conveniente ventilar suavemente o humidificar.`;
+      }
+    } else {
+      comfortTitle.textContent = "Calidad del Aire y Concentración de CO₂";
+      comfortDesc.textContent = `El sensor de aire registra concentraciones controladas de CO₂ en sótano y zonas habitadas (media en valores seguros por debajo de 800 ppm).`;
+    }
+  }
+}
+
+function drawClimateChart(hoverIndex = climateChartHoverIndex) {
+  const canvas = document.getElementById("climate-chart-canvas");
+  if (!canvas || !climateHistoryData) return;
+
+  const ctx = canvas.getContext("2d");
+  const data = climateHistoryData;
+  const sensors = (data.sensors || []).filter(s => !climateHistoryDisabledSensors.has(s.id));
+  const points = data.points || [];
+  const unit = data.unit || "°C";
+
+  // Handle Retina resolution
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const w = rect.width || 760;
+  const h = rect.height || 260;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  ctx.scale(dpr, dpr);
+
+  ctx.clearRect(0, 0, w, h);
+
+  if (points.length === 0 || sensors.length === 0) {
+    ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+    ctx.font = "14px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Sin datos registrados para los sensores y fechas seleccionadas", w / 2, h / 2);
+    return;
+  }
+
+  // Calculate Global Bounds
+  let minVal = Infinity;
+  let maxVal = -Infinity;
+
+  points.forEach(pt => {
+    sensors.forEach(s => {
+      const v = pt.values?.[s.id];
+      if (v != null) {
+        if (v < minVal) minVal = v;
+        if (v > maxVal) maxVal = v;
+      }
+    });
+  });
+
+  if (!isFinite(minVal) || !isFinite(maxVal)) {
+    minVal = 18; maxVal = 26;
+  }
+
+  const span = Math.max(1.0, maxVal - minVal);
+  const yMin = Math.floor(minVal - (span * 0.12));
+  const yMax = Math.ceil(maxVal + (span * 0.12));
+
+  const padLeft = 45;
+  const padRight = 18;
+  const padTop = 22;
+  const padBottom = 32;
+
+  const plotW = w - padLeft - padRight;
+  const plotH = h - padTop - padBottom;
+
+  const getX = (idx) => padLeft + (idx / Math.max(1, points.length - 1)) * plotW;
+  const getY = (val) => padTop + plotH - ((val - yMin) / (yMax - yMin)) * plotH;
+
+  // Horizontal Grid Lines & Y Ticks (5 lines)
+  const numYTicks = 5;
+  ctx.lineWidth = 1;
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  ctx.font = "11px system-ui, sans-serif";
+
+  for (let i = 0; i <= numYTicks; i++) {
+    const val = yMin + ((yMax - yMin) * (i / numYTicks));
+    const yPos = getY(val);
+
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+    ctx.beginPath();
+    ctx.moveTo(padLeft, yPos);
+    ctx.lineTo(w - padRight, yPos);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
+    const formattedVal = (climateHistoryCurrentMetric === "co2" || unit === "%") ? Math.round(val) : val.toFixed(1);
+    ctx.fillText(`${formattedVal}${unit}`, padLeft - 6, yPos);
+  }
+
+  // X Axis Ticks (Days of Month)
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
+  const stepX = Math.max(1, Math.floor(points.length / 7));
+  for (let i = 0; i < points.length; i += stepX) {
+    const pt = points[i];
+    const xPos = getX(i);
+    const dayLabel = `Día ${pt.day}`;
+    ctx.fillText(dayLabel, xPos, h - padBottom + 8);
+  }
+
+  // Draw Sensor Lines
+  sensors.forEach(s => {
+    ctx.save();
+    ctx.strokeStyle = s.color;
+    ctx.fillStyle = s.color;
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.shadowColor = s.color;
+    ctx.shadowBlur = 5;
+
+    ctx.beginPath();
+    let started = false;
+
+    points.forEach((pt, idx) => {
+      const v = pt.values?.[s.id];
+      if (v != null) {
+        const px = getX(idx);
+        const py = getY(v);
+        if (!started) {
+          ctx.moveTo(px, py);
+          started = true;
+        } else {
+          ctx.lineTo(px, py);
+        }
+      }
+    });
+    ctx.stroke();
+    ctx.restore();
+  });
+
+  // Hover Cursor & Highlight
+  const tip = document.getElementById("climate-chart-tooltip");
+  if (hoverIndex != null && hoverIndex >= 0 && hoverIndex < points.length) {
+    const pt = points[hoverIndex];
+    const cursorX = getX(hoverIndex);
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.45)";
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(cursorX, padTop);
+    ctx.lineTo(cursorX, h - padBottom);
+    ctx.stroke();
+    ctx.restore();
+
+    let tipRows = [];
+    sensors.forEach(s => {
+      const v = pt.values?.[s.id];
+      if (v != null) {
+        const py = getY(v);
+        ctx.save();
+        ctx.fillStyle = s.color;
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cursorX, py, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+
+        tipRows.push(`
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:3px;">
+            <span style="display:flex; align-items:center; gap:5px; color:${s.color};">
+              <span style="width:7px; height:7px; border-radius:999px; background:${s.color}; display:inline-block;"></span>
+              ${s.name}
+            </span>
+            <b>${v} ${unit}</b>
+          </div>
+        `);
+      }
+    });
+
+    if (tip && tipRows.length > 0) {
+      tip.style.display = "block";
+      tip.innerHTML = `
+        <div style="font-weight:700; color:var(--neon-cyan); margin-bottom:4px; font-size:0.75rem; border-bottom:1px solid rgba(255,255,255,0.12); padding-bottom:3px;">
+          📅 ${pt.label}
+        </div>
+        ${tipRows.join("")}
+      `;
+
+      const tipW = tip.offsetWidth || 150;
+      let leftPos = cursorX + 12;
+      if (leftPos + tipW > w - 10) {
+        leftPos = cursorX - tipW - 12;
+      }
+      tip.style.left = `${Math.max(10, leftPos)}px`;
+      tip.style.top = `${padTop + 10}px`;
+    }
+  } else {
+    if (tip) tip.style.display = "none";
+  }
+}
+
+// Controls & Listeners
+document.getElementById("btn-climate-modal-close")?.addEventListener("click", closeClimateHistoryModal);
+document.getElementById("climate-history-modal")?.addEventListener("click", (e) => {
+  if (e.target.id === "climate-history-modal") closeClimateHistoryModal();
+});
+
+document.querySelectorAll(".climate-metric-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const metric = btn.getAttribute("data-metric");
+    if (metric && metric !== climateHistoryCurrentMetric) {
+      climateHistoryCurrentMetric = metric;
+      climateHistoryDisabledSensors.clear();
+      fetchAndRenderClimateHistory();
+    }
+  });
+});
+
+const climMonthSel = document.getElementById("climate-month-select");
+const climYearSel = document.getElementById("climate-year-select");
+
+function handleClimateDateChange() {
+  const m = climMonthSel?.value || "11";
+  const y = climYearSel?.value || "2026";
+  climateHistoryCurrentMonth = `${y}-${String(m).padStart(2, "0")}`;
+  fetchAndRenderClimateHistory();
+}
+
+climMonthSel?.addEventListener("change", handleClimateDateChange);
+climYearSel?.addEventListener("change", handleClimateDateChange);
+
+document.getElementById("climate-prev-month")?.addEventListener("click", () => {
+  let m = parseInt(climMonthSel.value, 10) - 1;
+  let y = parseInt(climYearSel.value, 10);
+  if (m < 1) { m = 12; y -= 1; }
+  climMonthSel.value = String(m);
+  climYearSel.value = String(y);
+  handleClimateDateChange();
+});
+
+document.getElementById("climate-next-month")?.addEventListener("click", () => {
+  let m = parseInt(climMonthSel.value, 10) + 1;
+  let y = parseInt(climYearSel.value, 10);
+  if (m > 12) { m = 1; y += 1; }
+  climMonthSel.value = String(m);
+  climYearSel.value = String(y);
+  handleClimateDateChange();
+});
+
+document.getElementById("climate-today-btn")?.addEventListener("click", () => {
+  const n = new Date();
+  climMonthSel.value = String(n.getMonth() + 1);
+  climYearSel.value = String(n.getFullYear());
+  handleClimateDateChange();
+});
+
+// Canvas interactive pointer tracking
+const climChartWrap = document.getElementById("climate-chart-wrapper");
+if (climChartWrap) {
+  function handlePointerMove(e) {
+    if (!climateHistoryData || !climateHistoryData.points?.length) return;
+    const canvas = document.getElementById("climate-chart-canvas");
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const padLeft = 45;
+    const padRight = 18;
+    const plotW = rect.width - padLeft - padRight;
+    const relX = clientX - rect.left - padLeft;
+    const pct = Math.max(0, Math.min(1, relX / plotW));
+    const idx = Math.round(pct * (climateHistoryData.points.length - 1));
+    climateChartHoverIndex = idx;
+    drawClimateChart(idx);
+  }
+
+  climChartWrap.addEventListener("mousemove", handlePointerMove);
+  climChartWrap.addEventListener("touchmove", handlePointerMove, { passive: true });
+  climChartWrap.addEventListener("mouseleave", () => {
+    climateChartHoverIndex = null;
+    drawClimateChart(null);
+  });
+  climChartWrap.addEventListener("touchend", () => {
+    climateChartHoverIndex = null;
+    drawClimateChart(null);
+  });
+}
+
+window.addEventListener("resize", () => {
+  const modal = document.getElementById("climate-history-modal");
+  if (modal && !modal.classList.contains("hidden") && modal.style.display !== "none") {
+    drawClimateChart();
+  }
+});
+
 // --- Slide Interval Selector ---
 const modalIntervalSel = document.getElementById("modal-slide-interval-select");
 if (modalIntervalSel) {
@@ -4339,6 +4838,12 @@ function closeCalendarModal() {
 }
 
 document.getElementById("hud-calendar-pill")?.addEventListener("click", openCalendarModal);
+document.getElementById("clock-touch-target")?.addEventListener("click", (e) => {
+  if (e.target.closest("#standby-incident-badge")) return;
+  openCalendarModal();
+});
+document.getElementById("clock-time")?.addEventListener("click", openCalendarModal);
+document.getElementById("clock-date")?.addEventListener("click", openCalendarModal);
 document.getElementById("btn-calendar-modal-close")?.addEventListener("click", closeCalendarModal);
 document.getElementById("calendar-modal")?.addEventListener("click", (e) => {
   if (e.target.id === "calendar-modal") closeCalendarModal();
