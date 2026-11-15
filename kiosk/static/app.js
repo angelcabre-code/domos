@@ -1238,7 +1238,7 @@ window.connectAllCameras = function() {
   cams.forEach((id, idx) => {
     setTimeout(() => {
       window.requestCameraLive(id);
-    }, idx * 450);
+    }, idx * 600);
   });
 };
 
@@ -1251,73 +1251,7 @@ window.stopAllCameras = function() {
 
 
 // --- Shared Low-Latency WebRTC / HLS Stream Attacher ---
-async function attachLiveStream(videoEl, camId, streamData) {
-  if (streamData && streamData.mode === "webrtc" && streamData.webrtc_url && window.RTCPeerConnection) {
-    try {
-      const pc = new RTCPeerConnection({ iceServers: [] });
-      const mediaStream = new MediaStream();
-      videoEl.srcObject = mediaStream;
-
-      pc.ontrack = (ev) => {
-        if (ev.track && !mediaStream.getTracks().some(t => t.id === ev.track.id)) {
-          mediaStream.addTrack(ev.track);
-        }
-        videoEl.play().catch(() => {
-          videoEl.muted = true;
-          videoEl.play().catch(() => {});
-        });
-      };
-
-      pc.addTransceiver("video", { direction: "recvonly" });
-      pc.addTransceiver("audio", { direction: "recvonly" });
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      await new Promise((resolve) => {
-        if (pc.iceGatheringState === "complete") return resolve();
-        const t = setTimeout(resolve, 400);
-        pc.onicegatheringstatechange = () => {
-          if (pc.iceGatheringState === "complete") {
-            clearTimeout(t);
-            resolve();
-          }
-        };
-      });
-
-      const resp = await fetch(streamData.webrtc_url, {
-        method: "POST",
-        headers: { "Content-Type": "application/sdp" },
-        body: pc.localDescription.sdp,
-      });
-
-      if (!resp.ok) throw new Error("WebRTC SDP HTTP " + resp.status);
-      const answerSdp = await resp.text();
-      await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
-
-      return {
-        mode: "webrtc",
-        destroy: () => {
-          try { pc.close(); } catch (e) {}
-          try { videoEl.srcObject = null; } catch (e) {}
-        }
-      };
-    } catch (err) {
-      console.warn("WebRTC falló, usando HLS de respaldo:", err);
-      try { videoEl.srcObject = null; } catch (e) {}
-      try {
-        const fbRes = await fetch("/api/camera/stream/" + camId + "?force_hls=1");
-        const fbData = await fbRes.json();
-        if (fbData && fbData.success && fbData.url) {
-          streamData = fbData;
-        }
-      } catch (e) {}
-    }
-  }
-
-  const url = streamData && streamData.url;
-  if (!url) throw new Error("Sin URL de streaming");
-
+function attachHlsStream(videoEl, url) {
   if (window.Hls && Hls.isSupported()) {
     const hls = new Hls({
       enableWorker: true,
@@ -1350,7 +1284,10 @@ async function attachLiveStream(videoEl, camId, streamData) {
     };
   } else if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
     videoEl.src = url;
-    videoEl.play().catch(() => {});
+    videoEl.play().catch(() => {
+      videoEl.muted = true;
+      videoEl.play().catch(() => {});
+    });
     return {
       mode: "native-hls",
       destroy: () => {
@@ -1358,7 +1295,122 @@ async function attachLiveStream(videoEl, camId, streamData) {
       }
     };
   }
-  throw new Error("Navegador sin soporte WebRTC ni HLS");
+  return { mode: "none", destroy: () => {} };
+}
+
+async function attachLiveStream(videoEl, camId, streamData) {
+  let activeHlsController = null;
+  let isHlsActive = false;
+
+  const fallbackToHls = async () => {
+    if (isHlsActive) return;
+    isHlsActive = true;
+    try { videoEl.srcObject = null; } catch (e) {}
+    try {
+      const fbRes = await fetch("/api/camera/stream/" + camId + "?force_hls=1");
+      const fbData = await fbRes.json();
+      if (fbData && fbData.success && fbData.url) {
+        activeHlsController = attachHlsStream(videoEl, fbData.url);
+      }
+    } catch (e) {
+      console.error("[HLS Fallback Error]", camId, e);
+    }
+  };
+
+  if (streamData && streamData.mode === "webrtc" && streamData.webrtc_url && window.RTCPeerConnection) {
+    try {
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] }
+        ]
+      });
+      const mediaStream = new MediaStream();
+
+      pc.ontrack = (ev) => {
+        if (ev.streams && ev.streams[0]) {
+          videoEl.srcObject = ev.streams[0];
+        } else if (ev.track) {
+          if (!mediaStream.getTracks().some(t => t.id === ev.track.id)) {
+            mediaStream.addTrack(ev.track);
+          }
+          videoEl.srcObject = mediaStream;
+        }
+        videoEl.play().catch(() => {
+          videoEl.muted = true;
+          videoEl.play().catch(() => {});
+        });
+      };
+
+      pc.addTransceiver("video", { direction: "recvonly" });
+      pc.addTransceiver("audio", { direction: "recvonly" });
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      await new Promise((resolve) => {
+        if (pc.iceGatheringState === "complete") return resolve();
+        const t = setTimeout(resolve, 600);
+        pc.onicegatheringstatechange = () => {
+          if (pc.iceGatheringState === "complete") {
+            clearTimeout(t);
+            resolve();
+          }
+        };
+      });
+
+      const resp = await fetch(streamData.webrtc_url, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: pc.localDescription.sdp,
+      });
+
+      if (!resp.ok) throw new Error("WebRTC SDP HTTP " + resp.status);
+      const answerSdp = await resp.text();
+      await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+
+      // Watchdog: If no frames within 4.5s or if ICE fails, fall back to HLS
+      const watchdog = setTimeout(() => {
+        if (!isHlsActive && videoEl.videoWidth === 0) {
+          console.warn("[WebRTC Watchdog] No video frames for " + camId + ", switching to HLS...");
+          try { pc.close(); } catch (e) {}
+          fallbackToHls();
+        }
+      }, 4500);
+
+      pc.oniceconnectionstatechange = () => {
+        if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+          clearTimeout(watchdog);
+          console.warn("[WebRTC ICE " + pc.iceConnectionState + "] Switching to HLS for " + camId);
+          try { pc.close(); } catch (e) {}
+          fallbackToHls();
+        }
+      };
+
+      return {
+        mode: "webrtc",
+        destroy: () => {
+          clearTimeout(watchdog);
+          try { pc.close(); } catch (e) {}
+          try { videoEl.srcObject = null; } catch (e) {}
+          if (activeHlsController) activeHlsController.destroy();
+        }
+      };
+    } catch (err) {
+      console.warn("WebRTC falló, usando HLS de respaldo:", err);
+      try { videoEl.srcObject = null; } catch (e) {}
+      await fallbackToHls();
+      return {
+        mode: "hls-fallback",
+        destroy: () => {
+          if (activeHlsController) activeHlsController.destroy();
+        }
+      };
+    }
+  }
+
+  const url = streamData && streamData.url;
+  if (!url) throw new Error("Sin URL de streaming");
+  return attachHlsStream(videoEl, url);
 }
 
 window.stopCameraLive = function(camId) {

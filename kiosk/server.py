@@ -1333,10 +1333,18 @@ async def get_cameras():
     return summary.get("cameras", [])
 
 def _go2rtc_register_sync(camera_id: str, rtsp_url: str):
+    # Delete first to ensure any expired or stuck RTSP producer is evicted
+    try:
+        del_req = urllib.request.Request(f"http://127.0.0.1:1984/api/streams?src={urllib.parse.quote(camera_id)}", method="DELETE")
+        with urllib.request.urlopen(del_req, timeout=2):
+            pass
+    except Exception:
+        pass
+
     qs = urllib.parse.urlencode({"name": camera_id, "src": rtsp_url})
     req = urllib.request.Request(f"http://127.0.0.1:1984/api/streams?{qs}", method="PUT")
-    with urllib.request.urlopen(req, timeout=4) as r:
-        return r.status == 200
+    with urllib.request.urlopen(req, timeout=5) as r:
+        return r.status in (200, 201)
 
 def _go2rtc_webrtc_sync(src: str, offer_sdp: bytes, content_type: str):
     qs = urllib.parse.urlencode({"src": src})
@@ -1346,8 +1354,12 @@ def _go2rtc_webrtc_sync(src: str, offer_sdp: bytes, content_type: str):
         headers={"Content-Type": content_type or "application/sdp"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=6) as r:
-        return r.status, r.read(), r.headers.get("Content-Type", "application/sdp")
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            return r.status, r.read(), r.headers.get("Content-Type", "application/sdp")
+    except urllib.error.HTTPError as e:
+        err_body = e.read() if hasattr(e, "read") else str(e).encode()
+        return e.code, err_body, "text/plain"
 
 async def allocate_low_latency_stream(camera_id: str, force_hls: bool = False):
     if not force_hls:
