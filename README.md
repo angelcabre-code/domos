@@ -4,6 +4,7 @@
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![Display: Wayland / Cage](https://img.shields.io/badge/Display-Wayland%20%2F%20Cage-orange.svg)](https://github.com/cage-kiosk/cage)
 [![Android: Native Kotlin](https://img.shields.io/badge/Android-Kotlin%20%2F%20Compose-purple.svg)](https://developer.android.com/kotlin)
+[![Release: APK v1.0.0](https://img.shields.io/badge/Download-APK%20v1.0.0-blueviolet.svg)](https://github.com/angelcabre-code/domos/releases/tag/v1.0.0)
 [![Platform: Intel Bay Trail / x86_64](https://img.shields.io/badge/Architecture-x86__64%20(32--bit%20UEFI)-yellow.svg)](https://kernel.org)
 
 **Domos** es un sistema operativo y centro de control domótico integral diseñado para devolver a la vida tablets y dispositivos convertibles obsoletos (como las **Asus Transformer Book T100TA / T200TA**, Lenovo Miix o Acer Switch con procesadores Intel Atom Bay Trail / Cherry Trail), convirtiéndolos en elegantes **pantallas murales domóticas 24/7** con estética *glassmorphism*, asistente de voz 100% offline, protección química de batería y control unificado multi-ecosistema.
