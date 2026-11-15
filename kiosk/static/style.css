@@ -223,10 +223,11 @@ body, html {
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25), 0 0 10px rgba(245, 158, 11, 0.12) !important;
   display: inline-flex !important;
   align-items: center !important;
-  gap: 0.65rem !important;
-  padding: 0.35rem 1.1rem !important;
+  gap: 0.55rem !important;
+  padding: 0 0.95rem !important;
   border-radius: 9999px !important;
-  height: 42px !important;
+  height: 38px !important;
+  max-height: 38px !important;
   box-sizing: border-box !important;
   white-space: nowrap !important;
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
@@ -259,14 +260,14 @@ body, html {
   align-items: flex-start !important;
   justify-content: center !important;
   line-height: 1 !important;
-  gap: 2px !important;
+  gap: 1px !important;
   white-space: nowrap !important;
 }
 
 .solar-val {
   font-weight: 700 !important;
   color: #fbbf24 !important;
-  font-size: 0.96rem !important;
+  font-size: 0.9rem !important;
   line-height: 1.1 !important;
   white-space: nowrap !important;
   font-variant-numeric: tabular-nums;
@@ -276,7 +277,7 @@ body, html {
 
 .solar-badge-label,
 .solar-pill .pill-badge {
-  font-size: 0.66rem !important;
+  font-size: 0.62rem !important;
   font-weight: 700 !important;
   color: #f59e0b !important;
   text-transform: uppercase !important;
@@ -298,6 +299,7 @@ body, html {
 .top-right-indicators .liquid-pill,
 .top-right-indicators .status-pill,
 .top-right-indicators .photo-source-pill,
+.top-right-indicators .solar-pill,
 .top-right-indicators .battery-pill {
   height: 38px !important;
   max-height: 38px !important;
@@ -1972,20 +1974,25 @@ body.hide-cursor * {
 }
 
 .indoor-climate-stack {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-  align-items: center;
+  display: inline-flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 0.55rem !important;
+  width: fit-content !important;
 }
 
 .indoor-climate-pill {
   border-radius: 9999px !important;
-  padding: 0.55rem 1.15rem !important;
+  padding: 0.45rem 1.15rem !important;
   box-shadow: var(--glass-specular), var(--glass-shadow-sm) !important;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.55rem;
-  font-size: 1.02rem;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.55rem !important;
+  font-size: 0.96rem !important;
+  white-space: nowrap !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-width: 285px !important;
 }
 
 .indoor-climate-room {
@@ -2927,10 +2934,12 @@ body.hide-cursor * {
    ======================================================== */
 .hud-calendar-pill {
   align-self: flex-start;
-  font-size: 0.82rem;
+  font-size: 0.84rem;
   font-weight: 600;
   gap: 0.45rem;
+  min-width: 285px;
   max-width: 420px;
+  box-sizing: border-box;
 }
 
 .hud-calendar-pill #hud-calendar-text {
