@@ -33,16 +33,17 @@ if not BAT_PATH.exists():
     BAT_PATH = bats[0] if bats else None
 
 DEFAULT_CONFIG = {
-    "min_pct": 40,
-    "max_pct": 70,
+    "min_pct": 45,
+    "max_pct": 75,
     "check_interval_sec": 25,
     "smart_plug_type": "domos_api",
-    "tuya_device_id": "YOUR_CHARGER_PLUG_DEVICE_ID",
-    "tuya_ip": "",
-    "tuya_local_key": "",
+    "tuya_device_id": "bf2989a92a26b9381drtlg",
+    "tuya_ip": "192.168.5.101",
+    "tuya_local_key": "oc5bz!sk[b_H*t&`",
     "webhook_on_url": "",
     "webhook_off_url": "",
-    "watchdog_countdown_sec": 3000
+    "watchdog_countdown_sec": 900,
+    "min_charge_duration_min": 35
 }
 
 # Seed cycles from real verified historical logs (Nov 13-15)
@@ -107,9 +108,21 @@ def load_config():
         return DEFAULT_CONFIG
     try:
         cfg = json.loads(CONFIG_PATH.read_text())
-        # Enforce minimum safety threshold of 40% for degraded battery cell
-        if cfg.get("min_pct", 30) < 40:
-            cfg["min_pct"] = 40
+        # Enforce gentle smart cycle parameters for degraded battery cell
+        changed = False
+        if cfg.get("min_pct", 30) < 45:
+            cfg["min_pct"] = 45
+            changed = True
+        if cfg.get("max_pct", 70) < 75:
+            cfg["max_pct"] = 75
+            changed = True
+        if cfg.get("watchdog_countdown_sec", 3000) > 900:
+            cfg["watchdog_countdown_sec"] = 900
+            changed = True
+        if "min_charge_duration_min" not in cfg:
+            cfg["min_charge_duration_min"] = 35
+            changed = True
+        if changed:
             CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
         return cfg
     except Exception:
@@ -231,10 +244,10 @@ def set_plug_state(state: bool, config: dict):
     action = "ON (Encender carga)" if state else "OFF (Cortar carga y armar Watchdog)"
     logging.info(f"Comando de enchufe: {action}")
     
-    dev_id = config.get("tuya_device_id", "YOUR_CHARGER_PLUG_DEVICE_ID")
-    ip = config.get("tuya_ip", "192.168.1.100") or "192.168.1.100"
-    key = config.get("tuya_local_key", "YOUR_PLUG_LOCAL_KEY") or "YOUR_PLUG_LOCAL_KEY"
-    watchdog_sec = int(config.get("watchdog_countdown_sec", 3000))
+    dev_id = config.get("tuya_device_id", "bf2989a92a26b9381drtlg")
+    ip = config.get("tuya_ip", "192.168.5.101") or "192.168.5.101"
+    key = config.get("tuya_local_key", "oc5bz!sk[b_H*t&`") or "oc5bz!sk[b_H*t&`"
+    watchdog_sec = int(config.get("watchdog_countdown_sec", 900))
     
     lan_success = False
     try:
@@ -364,58 +377,80 @@ def main():
                             severity="warning"
                         )
 
-                # EMERGENCY DEFENSE 2: Critical <= 22% and not charging -> ACPI S3 Deep Suspend
-                # Asus Transformer cannot cold-boot from 0% (S5) without physical power button press.
-                # Suspend to RAM drops consumption from 10W to 0.08W, giving 4+ days of survival.
+                # EMERGENCY DEFENSE 2: Critical <= 22% and not charging
                 if cap <= 22 and not is_charging:
-                    logging.critical(f"🛑 BATERÍA CRÍTICA AL {cap}%. Entrando en suspensión ACPI S3 para evitar muerte en S5.")
-                    report_battery_incident(
-                        "Alerta Crítica: Suspensión de Emergencia",
-                        f"Batería al {cap}% sin alimentación. Domos entra en suspensión RAM (S3) para proteger la batería y evitar el apagado irrecuperable en frío.",
-                        severity="critical"
-                    )
-                    save_history(history)
-                    try:
-                        subprocess.run(["sync"], check=False)
-                        subprocess.run(["sudo", "systemctl", "suspend"], check=False)
-                    except Exception as e_susp:
-                        logging.error(f"Error al suspender: {e_susp}")
+                    logging.critical(f"🛑 BATERÍA CRÍTICA AL {cap}%. Forzando encendido inmediato de enchufe antes de cualquier acción...")
+                    set_plug_state(True, config)
+                    time.sleep(3)
+                    # Re-verify if charging engaged
+                    fresh_bat = get_detailed_battery()
+                    if fresh_bat.get("is_charging"):
+                        logging.info("✅ Enchufe reactivado con éxito antes de suspender. Evitada la suspensión.")
+                        is_charging = True
+                        last_action = "ON"
+                    else:
+                        logging.critical(f"🛑 BATERÍA CRÍTICA AL {cap}% y el enchufe no suministra corriente. Entrando en suspensión ACPI S3 para evitar muerte en S5.")
+                        report_battery_incident(
+                            "Alerta Crítica: Suspensión de Emergencia",
+                            f"Batería al {cap}% sin alimentación. Domos entra en suspensión RAM (S3) para proteger la batería y evitar el apagado irrecuperable en frío.",
+                            severity="critical"
+                        )
+                        save_history(history)
+                        try:
+                            subprocess.run(["sync"], check=False)
+                            subprocess.run(["sudo", "systemctl", "suspend"], check=False)
+                        except Exception as e_susp:
+                            logging.error(f"Error al suspender: {e_susp}")
 
-                # LOGIC: CUT POWER AT MAX_PCT (70%)
-                if cap >= max_p and is_charging and last_action != "OFF":
-                    logging.info(f"Batería al {cap}% (>= {max_p}%). Cortando carga y activando watchdog de 50 min.")
-                    set_plug_state(False, config)
-                    last_action = "OFF"
+                # SMART CYCLING POLICY:
+                is_night = (now_dt.hour >= 23 or now_dt.hour < 8)
+                min_charge_dur = int(config.get("min_charge_duration_min", 35))
+                charge_elapsed = current_phase.get("elapsed_min", 0) if current_phase.get("type") == "charge" else 0
 
-                    if current_phase.get("type") == "charge":
-                        dur = max(1, current_phase["elapsed_min"])
-                        history["cycles"].insert(0, {
-                            "type": "charge",
-                            "start_time": current_phase.get("start_time", now_str),
-                            "end_time": now_str,
-                            "duration_min": dur,
-                            "start_pct": current_phase.get("start_pct", min_p),
-                            "end_pct": cap,
-                            "mode": "charge",
-                            "health_pct": bat["health_pct"]
-                        })
+                # 1. NIGHT CONTINUOUS MODE (23:00 - 08:00): Never cut power at night!
+                if is_night:
+                    if not is_charging:
+                        logging.info("🌙 Modo Noche Continuo activo (23h-08h): asegurando carga activa ON.")
+                        set_plug_state(True, config)
+                        last_action = "ON"
 
-                    # Begin discharge phase
-                    history["current_phase"] = {
-                        "type": "discharge",
-                        "start_time": now_str,
-                        "start_pct": cap,
-                        "start_ts": now_ts,
-                        "current_pct": cap,
-                        "elapsed_min": 0
-                    }
-                    history["cycles"] = history["cycles"][:60]
-                    recompute_stats(history)
-                    save_history(history)
+                # 2. DAYTIME CUT POWER: Only if cap >= max_p AND has charged for at least min_charge_dur
+                elif cap >= max_p and is_charging and last_action != "OFF":
+                    if charge_elapsed < min_charge_dur:
+                        logging.info(f"Batería marca {cap}% pero solo lleva {charge_elapsed} min cargando (< {min_charge_dur} min anti-rebote). Manteniendo carga.")
+                    else:
+                        logging.info(f"Batería al {cap}% tras {charge_elapsed} min de carga sólida. Cortando carga diurna y activando watchdog de 15 min.")
+                        set_plug_state(False, config)
+                        last_action = "OFF"
 
-                # LOGIC: RESTORE POWER AT MIN_PCT (40%) - CONTINUOUS ASSERTION
+                        if current_phase.get("type") == "charge":
+                            dur = max(1, current_phase["elapsed_min"])
+                            history["cycles"].insert(0, {
+                                "type": "charge",
+                                "start_time": current_phase.get("start_time", now_str),
+                                "end_time": now_str,
+                                "duration_min": dur,
+                                "start_pct": current_phase.get("start_pct", min_p),
+                                "end_pct": cap,
+                                "mode": "charge",
+                                "health_pct": bat["health_pct"]
+                            })
+
+                        # Begin discharge phase
+                        history["current_phase"] = {
+                            "type": "discharge",
+                            "start_time": now_str,
+                            "start_pct": cap,
+                            "start_ts": now_ts,
+                            "current_pct": cap,
+                            "elapsed_min": 0
+                        }
+                        history["cycles"] = history["cycles"][:60]
+                        recompute_stats(history)
+                        save_history(history)
+
+                # 3. RESTORE POWER AT MIN_PCT (45%)
                 elif cap <= min_p:
-                    # If not charging, continuously assert ON command every tick!
                     if not is_charging:
                         logging.warning(f"Batería al {cap}% (<= {min_p}%) y NO cargando. Forzando encendido de enchufe...")
                         set_plug_state(True, config)
@@ -424,7 +459,6 @@ def main():
                         last_action = "ON"
                         if current_phase.get("type") == "discharge":
                             dur = max(1, current_phase["elapsed_min"])
-                            is_night = (now_dt.hour >= 23 or now_dt.hour < 8)
                             history["cycles"].insert(0, {
                                 "type": "discharge",
                                 "start_time": current_phase.get("start_time", now_str),
