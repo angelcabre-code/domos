@@ -210,7 +210,7 @@ def get_detailed_battery():
     if not BAT_PATH or not BAT_PATH.exists():
         return None
 
-    cap = read_sysfs_int("capacity", 50)
+    cap = min(100, max(0, read_sysfs_int("capacity", 50)))
     status = read_sysfs_str("status", "Discharging")
     v_raw = read_sysfs_int("voltage_now", 7600000)
     i_raw = read_sysfs_int("current_now", 500000)

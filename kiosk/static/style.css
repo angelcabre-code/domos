@@ -534,7 +534,7 @@ body, html {
 #assistant-overlay {
   position: fixed;
   inset: 0;
-  z-index: 600;
+  z-index: 9850;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2162,15 +2162,15 @@ body.hide-cursor * {
    DOMOS UNIFIED THEME-AWARE MODALS, WIDGETS & NEON ICONS
    ======================================================== */
 :root, [data-theme="light"] {
-  --modal-backdrop: rgba(15, 23, 42, 0.16);
-  --modal-card-bg: rgba(248, 250, 252, 0.44);
-  --modal-card-border: rgba(255, 255, 255, 0.72);
+  --modal-backdrop: rgba(15, 23, 42, 0.45);
+  --modal-card-bg: rgba(255, 255, 255, 0.96);
+  --modal-card-border: rgba(203, 213, 225, 0.9);
   --modal-text: #0f172a;
-  --modal-text-muted: #475569;
-  --modal-subcard-bg: rgba(255, 255, 255, 0.34);
-  --modal-subcard-border: rgba(255, 255, 255, 0.52);
-  --modal-input-bg: rgba(255, 255, 255, 0.94);
-  --modal-input-border: rgba(15, 23, 42, 0.18);
+  --modal-text-muted: #334155;
+  --modal-subcard-bg: rgba(241, 245, 249, 0.95);
+  --modal-subcard-border: rgba(203, 213, 225, 0.9);
+  --modal-input-bg: #ffffff;
+  --modal-input-border: #94a3b8;
   --modal-vumeter-bg: rgba(15, 23, 42, 0.08);
   --modal-btn-bg: rgba(15, 23, 42, 0.07);
   --modal-btn-border: rgba(15, 23, 42, 0.15);
@@ -2757,9 +2757,23 @@ body.hide-cursor * {
 
 .info-telemetry-grid {
   display: grid;
-  grid-template-columns: 0.85fr 1.35fr 1.45fr;
-  gap: 0.75rem;
+  grid-template-columns: 0.85fr 1.35fr 1.45fr 1.15fr;
+  gap: 0.65rem;
   align-items: start;
+}
+
+@media (max-width: 1180px) {
+  .info-telemetry-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .info-telemetry-grid {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
 }
 
 .info-telemetry-grid .section-title {
@@ -2771,8 +2785,33 @@ body.hide-cursor * {
 }
 
 .info-telemetry-grid #climate-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  grid-template-rows: auto auto !important;
+  gap: 0.45rem !important;
+}
+
+.hud-air-pill {
+  align-self: flex-start;
+  font-size: 0.82rem;
+  font-weight: 600;
   gap: 0.45rem;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #10b981;
+}
+
+.air-quality-card {
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.air-quality-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.18);
 }
 
 .info-telemetry-grid #security-grid {
@@ -3231,3 +3270,676 @@ body.hide-cursor * {
 }
 
 
+
+/* ========================================================
+   HIGH CONTRAST LIGHT THEME & MODAL STAT CARDS
+   ======================================================== */
+.domos-mini-stat {
+  padding: 0.6rem 0.8rem;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="light"] .domos-mini-stat {
+  background: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
+}
+
+[data-theme="light"] .domos-modal-card {
+  background: rgba(255, 255, 255, 0.96) !important;
+  color: #0f172a !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.22), 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+}
+
+[data-theme="light"] .domos-modal-card h3,
+[data-theme="light"] .domos-modal-card h4,
+[data-theme="light"] .domos-modal-header h3 {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+
+[data-theme="light"] .domos-modal-muted,
+[data-theme="light"] .domos-modal-card [style*="color:var(--modal-text-muted)"] {
+  color: #334155 !important;
+}
+
+[data-theme="light"] .domos-modal-subcard {
+  background: rgba(241, 245, 249, 0.95) !important;
+  border-color: rgba(203, 213, 225, 0.9) !important;
+  color: #0f172a !important;
+}
+
+/* Fix washed out colors on light backgrounds */
+[data-theme="light"] [style*="color:#38bdf8"],
+[data-theme="light"] [style*="color: #38bdf8"] {
+  color: #0284c7 !important;
+  font-weight: 700 !important;
+}
+
+[data-theme="light"] [style*="color:#fbbf24"],
+[data-theme="light"] [style*="color: #fbbf24"] {
+  color: #b45309 !important;
+  font-weight: 700 !important;
+}
+
+[data-theme="light"] [style*="color:#10b981"],
+[data-theme="light"] [style*="color: #10b981"],
+[data-theme="light"] [style*="color:#34d399"],
+[data-theme="light"] [style*="color: #34d399"] {
+  color: #047857 !important;
+  font-weight: 700 !important;
+}
+
+[data-theme="light"] [style*="color:#f59e0b"],
+[data-theme="light"] [style*="color: #f59e0b"] {
+  color: #b45309 !important;
+  font-weight: 700 !important;
+}
+
+/* General dashboard card titles and subtitles in light mode */
+[data-theme="light"] .card-title,
+[data-theme="light"] .card-title-group h4 {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+
+[data-theme="light"] .card-subtext,
+[data-theme="light"] .sub-metrics,
+[data-theme="light"] .sub-metrics span {
+  color: #334155 !important;
+  font-weight: 600 !important;
+}
+
+[data-theme="light"] .liquid-card {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-color: rgba(203, 213, 225, 0.8) !important;
+}
+
+
+/* HUD Telemetry Widgets (Indoor Climate & Air Quality) */
+.hud-telemetry-widget {
+  width: 100%;
+  max-width: 380px;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  padding: 0.55rem 0.8rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+  user-select: none;
+}
+
+.hud-telemetry-widget:hover {
+  transform: translateY(-2px);
+  border-color: rgba(56, 189, 248, 0.45);
+  box-shadow: 0 6px 25px rgba(56, 189, 248, 0.2);
+}
+
+.hud-widget-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 0.25rem;
+}
+
+.hud-widget-title {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--modal-text-muted);
+}
+
+.hud-widget-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.hud-widget-content-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem 0.6rem;
+}
+
+.hud-room-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  padding: 0.15rem 0.25rem;
+  border-radius: 6px;
+}
+
+.hud-room-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.hud-room-name {
+  color: rgba(255, 255, 255, 0.88);
+  font-weight: 500;
+}
+
+.hud-room-val {
+  font-weight: 700;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.hud-hum-pill {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #38bdf8;
+}
+
+
+/* ============================================================================
+   LIGHT MODE CONTRAST FIXES FOR HUD WIDGETS & AIR QUALITY CARDS
+   ============================================================================ */
+.hud-telemetry-widget {
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.3);
+  transition: transform 0.22s ease, background 1.4s ease, border-color 1.4s ease, box-shadow 1.4s ease, backdrop-filter 1.4s ease;
+}
+
+.hud-idle .hud-telemetry-widget {
+  background: rgba(15, 23, 42, 0.14) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  box-shadow: none !important;
+}
+
+.hud-idle .hud-widget-header {
+  border-bottom-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+.hud-widget-title {
+  color: rgba(255, 255, 255, 0.95) !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6) !important;
+}
+
+.hud-room-name {
+  color: #f8fafc !important;
+  font-weight: 600 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55) !important;
+}
+
+.hud-room-val {
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55) !important;
+}
+
+.hud-hum-pill {
+  color: #7dd3fc !important;
+  font-weight: 700 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Prevent global [data-theme="light"] rules from darkening text inside dark HUD widgets */
+[data-theme="light"] .hud-telemetry-widget [style*="color:#38bdf8"],
+[data-theme="light"] .hud-telemetry-widget [style*="color: #38bdf8"] {
+  color: #7dd3fc !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6) !important;
+}
+
+[data-theme="light"] .hud-telemetry-widget [style*="color:#10b981"],
+[data-theme="light"] .hud-telemetry-widget [style*="color: #10b981"] {
+  color: #6ee7b7 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6) !important;
+}
+
+[data-theme="light"] .hud-telemetry-widget [style*="color:#a855f7"],
+[data-theme="light"] .hud-telemetry-widget [style*="color: #a855f7"] {
+  color: #e9d5ff !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6) !important;
+}
+
+[data-theme="light"] #hud-climate-avg-badge {
+  background: rgba(56, 189, 248, 0.25) !important;
+  color: #bae6fd !important;
+  border-color: rgba(125, 211, 252, 0.45) !important;
+}
+
+[data-theme="light"] #hud-air-badge {
+  background: rgba(16, 185, 129, 0.28) !important;
+  color: #a7f3d0 !important;
+  border-color: rgba(110, 231, 183, 0.5) !important;
+}
+
+/* Light mode contrast inside Control Center & Modals for purple/air subcards */
+[data-theme="light"] .liquid-drawer-panel [style*="color:#a855f7"],
+[data-theme="light"] .domos-modal-card [style*="color:#a855f7"] {
+  color: #6d28d9 !important;
+  font-weight: 800 !important;
+}
+
+[data-theme="light"] .air-quality-card div[style*="background:rgba(255,255,255,0.04)"],
+[data-theme="light"] #air-modal-body div[style*="background:rgba(255,255,255,0.03)"] {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .climate-vert-name,
+[data-theme="light"] .climate-vert-temp {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .climate-vert-pill {
+  background: #e2e8f0 !important;
+  color: #1e293b !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+
+/* Smart Plug Consumption Chart Period Tabs */
+.plug-period-btn {
+  background: transparent;
+  color: var(--modal-text-muted);
+  border: none;
+  padding: 0.3rem 0.72rem;
+  border-radius: 8px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.plug-period-btn.active {
+  background: #0284c7;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35);
+}
+[data-theme="dark"] .plug-period-btn.active {
+  background: rgba(56, 189, 248, 0.25);
+  color: #7dd3fc !important;
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.5);
+}
+
+
+/* ============================================================================
+   LIGHT MODE CONTRAST FIX: CLIMATE HISTORY MODAL TABS, BADGE & CHART AXES
+   ============================================================================ */
+[data-theme="light"] #climate-history-modal .climate-metric-buttons {
+  background: #e2e8f0 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] #climate-history-modal .climate-metric-btn {
+  color: #334155 !important;
+  background: transparent !important;
+  font-weight: 600 !important;
+}
+
+[data-theme="light"] #climate-history-modal .climate-metric-btn:hover {
+  background: rgba(15, 23, 42, 0.06) !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] #climate-history-modal .climate-metric-btn.active {
+  background: #0284c7 !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35) !important;
+}
+
+[data-theme="light"] #climate-history-modal .climate-metric-btn.active span {
+  color: #ffffff !important;
+}
+
+[data-theme="light"] #climate-modal-active-badge {
+  background: #e0f2fe !important;
+  color: #0369a1 !important;
+  border-color: #7dd3fc !important;
+}
+
+[data-theme="light"] #climate-history-modal svg text {
+  fill: #475569 !important;
+}
+
+[data-theme="light"] #climate-history-modal svg line {
+  stroke: rgba(100, 116, 139, 0.25) !important;
+}
+
+
+/* ============================================================================
+   HORIZONTAL STACKED CARDS FOR SEGURIDAD & ACCESO + ALARM MODAL
+   ============================================================================ */
+.info-telemetry-grid #security-grid {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 0.45rem !important;
+}
+
+.sec-horiz-card {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 0.65rem !important;
+  padding: 0.62rem 0.85rem !important;
+  min-height: 0 !important;
+}
+
+.sec-horiz-left {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.sec-horiz-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.sec-horiz-info h4 {
+  margin: 0 !important;
+  font-size: 0.86rem !important;
+  font-weight: 700 !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sec-horiz-sub {
+  font-size: 0.72rem;
+  color: var(--modal-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sec-horiz-right {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.sec-horiz-card .card-icon-bubble {
+  width: 34px !important;
+  height: 34px !important;
+  font-size: 1.05rem !important;
+  flex-shrink: 0;
+}
+
+.sec-horiz-card .alarm-icon-btn {
+  width: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+
+/* ============================================================================
+   DISTINCTIVE GREEN (DISARM) & RED (ARM) ALARM BUTTONS (LIGHT & DARK MODE)
+   ============================================================================ */
+.alarm-btn-disarm {
+  background: rgba(16, 185, 129, 0.14) !important;
+  border: 1.5px solid rgba(16, 185, 129, 0.65) !important;
+  color: #059669 !important;
+}
+[data-theme="dark"] .alarm-btn-disarm {
+  color: #34d399 !important;
+}
+.alarm-btn-disarm.is-disarm-active {
+  background: #10b981 !important;
+  border-color: #059669 !important;
+  color: #ffffff !important;
+  box-shadow: 0 3px 10px rgba(16, 185, 129, 0.35) !important;
+}
+
+.alarm-btn-arm {
+  background: rgba(239, 68, 68, 0.14) !important;
+  border: 1.5px solid rgba(239, 68, 68, 0.65) !important;
+  color: #dc2626 !important;
+}
+[data-theme="dark"] .alarm-btn-arm {
+  color: #f87171 !important;
+}
+.alarm-btn-arm.is-arm-active {
+  background: #ef4444 !important;
+  border-color: #dc2626 !important;
+  color: #ffffff !important;
+  box-shadow: 0 3px 10px rgba(239, 68, 68, 0.38) !important;
+}
+
+.alarm-btn-home {
+  background: rgba(245, 158, 11, 0.14) !important;
+  border: 1.5px solid rgba(245, 158, 11, 0.6) !important;
+  color: #b45309 !important;
+}
+[data-theme="dark"] .alarm-btn-home {
+  color: #fbbf24 !important;
+}
+.alarm-btn-home.is-home-active {
+  background: #f59e0b !important;
+  border-color: #d97706 !important;
+  color: #ffffff !important;
+  box-shadow: 0 3px 10px rgba(245, 158, 11, 0.35) !important;
+}
+
+
+/* ========================================================
+   COMPACT ZERO-SCROLL GROUPED SETTINGS GRID (v5.5)
+   ======================================================== */
+.drawer-settings-panel {
+  padding: 0.75rem 0.9rem !important;
+  margin-bottom: 0.9rem !important;
+}
+
+.settings-grouped-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+@media (max-width: 980px) {
+  .settings-grouped-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.settings-group-box {
+  background: var(--glass-card-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.58rem;
+}
+
+.settings-group-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.settings-compact-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.settings-compact-row .setting-label {
+  font-size: 0.8rem;
+}
+
+.settings-vol-item {
+  padding: 0.38rem 0.55rem;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.10);
+  border: 1px solid rgba(148, 163, 184, 0.20);
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+}
+
+[data-theme="dark"] .settings-vol-item {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.10);
+}
+
+.settings-vol-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.settings-actions-compact {
+  margin-top: 0.65rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--glass-border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.42rem !important;
+}
+
+.settings-actions-compact .liquid-action-pill {
+  padding: 0.35rem 0.68rem !important;
+  font-size: 0.78rem !important;
+}
+
+.settings-actions-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin-right: 0.2rem;
+}
+
+[data-theme="dark"] #btn-open-schedules {
+  color: #38bdf8 !important;
+}
+[data-theme="dark"] #btn-reboot-device {
+  color: #fbbf24 !important;
+}
+[data-theme="dark"] #btn-poweroff-device {
+  color: #f87171 !important;
+}
+
+
+/* ========================================================
+   ENERGY SAVINGS / SMART AUTOCONSUMO MODAL & CARD (v5.8)
+   ======================================================== */
+.esav-mode-btn {
+  padding: 0.42rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--modal-input-border);
+  background: var(--modal-subcard-bg);
+  color: var(--modal-text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+.esav-mode-btn.active-auto {
+  background: rgba(16, 185, 129, 0.22);
+  border-color: #10b981;
+  color: #047857;
+}
+[data-theme="dark"] .esav-mode-btn.active-auto { color: #34d399; }
+.esav-mode-btn.active-paused {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: #f59e0b;
+  color: #b45309;
+}
+[data-theme="dark"] .esav-mode-btn.active-paused { color: #fbbf24; }
+.esav-mode-btn.active-vacation {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: #3b82f6;
+  color: #1d4ed8;
+}
+[data-theme="dark"] .esav-mode-btn.active-vacation { color: #60a5fa; }
+
+.esav-rule-card {
+  background: var(--modal-subcard-bg);
+  border: 1px solid var(--modal-subcard-border);
+  border-radius: 16px;
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.esav-fields-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.55rem;
+}
+.esav-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  font-size: 0.76rem;
+  color: var(--modal-text-muted);
+}
+.esav-field input,
+.esav-field select {
+  padding: 0.38rem 0.55rem;
+  border-radius: 10px;
+  border: 1px solid var(--modal-input-border);
+  background: var(--modal-input-bg);
+  color: var(--modal-text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  outline: none;
+}
+[data-theme="dark"] #btn-esav-save {
+  color: #6ee7b7 !important;
+}
+
+#energy-grid {
+  gap: 0.5rem !important;
+}
+#energy-grid .liquid-card[data-devid="energy_solar"] {
+  padding: 0.72rem 0.8rem !important;
+  gap: 0.35rem !important;
+}
+#energy-grid .energy-savings-compact-card {
+  padding: 0.52rem 0.68rem !important;
+  gap: 0.22rem !important;
+  min-height: 0 !important;
+}
+
+/* Compact top telemetry band so info cards + Favoritos fit on 1366x768 without scrolling (v6.0) */
+.info-telemetry-panel {
+  padding: 0.72rem 0.9rem !important;
+  margin-bottom: 0.72rem !important;
+}
+.info-telemetry-panel .section-title {
+  margin-bottom: 0.45rem !important;
+}

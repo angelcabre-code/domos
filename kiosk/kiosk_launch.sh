@@ -1,6 +1,7 @@
 #!/bin/bash
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export WAYLAND_DISPLAY="wayland-0"
+export WLR_DRM_NO_ATOMIC=1
 
 # Set brightness to 80% initially
 brightnessctl set 80% 2>/dev/null || true

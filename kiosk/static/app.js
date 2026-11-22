@@ -192,7 +192,7 @@ function decodeWeatherCode(code) {
 async function updateWeather() {
   try {
     const loc = getWeatherLocation();
-    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=5`);
+    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,weather_code&hourly=temperature_2m,weather_code,precipitation_probability,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=5`);
     if (res.ok) {
       const data = await res.json();
       latestWeatherData = data;
@@ -260,6 +260,47 @@ function openWeatherModal() {
         <div>💨 Viento: <strong>${Math.round(cur.wind_speed_10m ?? 0)} km/h</strong></div>
       </div>
     `;
+  }
+
+
+  // Render hourly forecast for today (from current hour onward, min 10 hours)
+  const hourlyWrap = document.getElementById("wmodal-hourly-wrap");
+  const hourlyStrip = document.getElementById("wmodal-hourly-strip");
+  const hourly = latestWeatherData.hourly;
+  if (hourlyWrap && hourlyStrip && hourly && Array.isArray(hourly.time)) {
+    const now = new Date();
+    const curHour = now.getHours();
+    const todayPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+    let startIdx = hourly.time.findIndex(t => t.startsWith(todayPrefix) && parseInt(t.slice(11, 13), 10) >= curHour);
+    if (startIdx < 0) startIdx = 0;
+
+    // Show remaining hours of today, or at least 10 upcoming hours if late at night
+    let endIdx = hourly.time.findIndex((t, i) => i >= startIdx && !t.startsWith(todayPrefix));
+    if (endIdx < 0) endIdx = Math.min(hourly.time.length, startIdx + 12);
+    if (endIdx - startIdx < 10) endIdx = Math.min(hourly.time.length, startIdx + 10);
+
+    const slice = [];
+    for (let i = startIdx; i < endIdx; i++) {
+      const tStr = hourly.time[i];
+      const hh = tStr.slice(11, 13);
+      const isNow = (i === startIdx && tStr.startsWith(todayPrefix));
+      const hInfo = decodeWeatherCode(hourly.weather_code[i]);
+      const hTemp = Math.round(hourly.temperature_2m[i]);
+      const hRain = hourly.precipitation_probability ? (hourly.precipitation_probability[i] ?? 0) : 0;
+      const hWind = hourly.wind_speed_10m ? Math.round(hourly.wind_speed_10m[i] ?? 0) : 0;
+      slice.push(`
+        <div class="domos-modal-subcard" style="min-width:68px; flex:0 0 auto; padding:0.55rem 0.45rem; border-radius:14px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:0.2rem; ${isNow ? "border-color:#0284c7; background:rgba(14,165,233,0.12);" : ""}">
+          <div style="font-size:0.72rem; font-weight:700; color:${isNow ? "#0284c7" : "var(--modal-text-muted)"};">${isNow ? "Ahora" : hh + ":00"}</div>
+          <div style="font-size:1.35rem; line-height:1.1;">${hInfo.icon}</div>
+          <div style="font-size:0.92rem; font-weight:800; color:var(--modal-text);">${hTemp}°</div>
+          <div style="font-size:0.68rem; color:${hRain > 0 ? "#0284c7" : "var(--modal-text-muted)"}; font-weight:${hRain > 0 ? "700" : "500"};">💧 ${hRain}%</div>
+          <div style="font-size:0.63rem; color:var(--modal-text-muted);">💨 ${hWind}</div>
+        </div>
+      `);
+    }
+    hourlyStrip.innerHTML = slice.join("");
+    hourlyWrap.style.display = slice.length ? "block" : "none";
   }
 
   const daily = latestWeatherData.daily;
@@ -1122,27 +1163,51 @@ function renderHudIndicators() {
     dockBtn2.classList.toggle("is-on", Boolean(light2.state?.state));
   }
 
-  const indoorStack = document.getElementById("indoor-climate-cards");
-  if (indoorStack && Array.isArray(deviceData.climate)) {
-    const validSensors = deviceData.climate.filter(c => c.state && (c.state.temperature !== undefined || c.state.humidity !== undefined));
-    indoorStack.innerHTML = validSensors.map(c => {
+  // 5. Update HUD Telemetry Widgets: Clima Interior & Calidad de Aire
+  const climGrid = document.getElementById("hud-climate-rooms-grid");
+  const avgBadge = document.getElementById("hud-climate-avg-badge");
+  
+  const allClim = [...(deviceData.climate || [])];
+  const purDev = (deviceData.xiaomi || []).find(d => d.kind === "purifier");
+  if (purDev && purDev.state && purDev.state.temperature !== undefined) {
+    allClim.push({
+      id: "purifier_climate",
+      name: "Purificador",
+      state: {
+        temperature: purDev.state.temperature,
+        humidity: purDev.state.humidity
+      }
+    });
+  }
+
+  if (climGrid && allClim.length > 0) {
+    let sumT = 0;
+    let countT = 0;
+    climGrid.innerHTML = allClim.map(c => {
       const room = (c.name || "Sensor").replace(/^(Higr[oó]metro|Sensor\s*Aire)\s*/i, "").trim() || c.name;
-      const tVal = c.state.temperature !== undefined ? `${c.state.temperature}°C` : "--°C";
-      const hVal = c.state.humidity !== undefined ? `${c.state.humidity}%` : "--%";
-      const co2Val = c.state.co2 !== undefined ? ` · CO₂ ${c.state.co2}` : "";
-      const icon = c.state.co2 !== undefined ? "🌬️" : "🌡️";
+      const t = c.state?.temperature;
+      const h = c.state?.humidity;
+      if (typeof t === "number") {
+        sumT += t;
+        countT++;
+      }
+      const tStr = t !== undefined ? `${t}°C` : "--°C";
+      const hStr = h !== undefined ? `${h}%` : "--%";
+      const icon = room.toLowerCase().includes("sótano") ? "🌬️" : (room.toLowerCase().includes("purif") ? "🌀" : (room.toLowerCase().includes("dorm") ? "🛏️" : "🛋️"));
       return `
-        <div class="liquid-pill indoor-climate-pill" title="Pulsa para ver evolución temporal del clima (${c.name})">
-          <span>${icon}</span>
-          <span class="indoor-climate-room">${room}:</span>
-          <span class="indoor-climate-vals">${tVal} · ${hVal}${co2Val}</span>
+        <div class="hud-room-item" title="${c.name}: ${tStr} · ${hStr}">
+          <span class="hud-room-name">${icon} ${room}</span>
+          <span class="hud-room-val">${tStr} <span class="hud-hum-pill">💧 ${hStr}</span></span>
         </div>
       `;
     }).join("");
-    indoorStack.querySelectorAll(".indoor-climate-pill").forEach(pill => {
-      pill.addEventListener("click", () => openClimateHistoryModal());
-    });
+
+    if (avgBadge && countT > 0) {
+      avgBadge.textContent = `Media: ${(sumT / countT).toFixed(1)}°C`;
+    }
   }
+
+  updateIndoorAirHud();
 }
 
 // Render Cameras Section (Videoportero, Pasillo, Sótano Impresora 3D, etc.)
@@ -1542,7 +1607,19 @@ function renderClimateGrid() {
   const sectionEl = document.getElementById("section-climate");
   if (!container || !deviceData.climate) return;
 
-  const allClimate = deviceData.climate;
+  const allClimate = [...(deviceData.climate || [])];
+  const purDev = (deviceData.xiaomi || []).find(d => d.kind === "purifier");
+  if (purDev && purDev.state && purDev.state.temperature !== undefined) {
+    allClimate.push({
+      id: "purifier_climate",
+      name: "Purificador",
+      state: {
+        temperature: purDev.state.temperature,
+        humidity: purDev.state.humidity,
+        battery: "Xiaomi"
+      }
+    });
+  }
   const climateList = isEditMode
     ? allClimate
     : allClimate.filter(c => !isDeviceHidden(c.id || ("climate_" + c.name)));
@@ -1573,6 +1650,7 @@ function renderClimateGrid() {
         <div class="climate-vert-sub">
           <span class="climate-vert-pill">💧 ${hum}%</span>
           <span class="climate-vert-pill">${badgeText}</span>
+          <span class="climate-vert-pill" style="color:var(--neon-cyan); font-weight:700;">📈 Gráfica ›</span>
         </div>
       </div>
     `;
@@ -1585,6 +1663,15 @@ function renderClimateGrid() {
       });
     });
   } else {
+    container.querySelectorAll(".liquid-card").forEach(card => {
+      const devid = card.getAttribute("data-devid");
+      if (devid === "energy_solar") {
+        card.style.cursor = "pointer";
+        card.addEventListener("click", () => {
+          openSolarModal();
+        });
+      }
+    });
     container.querySelectorAll(".climate-vertical-card").forEach(card => {
       card.style.cursor = "pointer";
       card.addEventListener("click", () => {
@@ -1613,7 +1700,7 @@ function renderEnergyGrid() {
   if (showSolar) {
     const hiddenClass = (isEditMode && isDeviceHidden("energy_solar")) ? "control-hidden-in-edit" : "";
     htmlParts.push(`
-      <div class="liquid-card is-on ${hiddenClass}" data-devid="energy_solar" style="cursor: ${isEditMode ? 'pointer' : 'default'};">
+      <div class="liquid-card is-on ${hiddenClass}" data-devid="energy_solar" style="cursor: pointer;" title="Abrir detalles de producción solar">
         ${getEditBadgeHtml("energy_solar", null, false)}
         <div class="card-top">
           <div class="card-icon-bubble" style="background: rgba(217, 119, 6, 0.25); color: var(--neon-amber);">⚡</div>
@@ -1633,6 +1720,38 @@ function renderEnergyGrid() {
       </div>
     `);
   }
+
+  // Tarjeta de Ahorro y Autoconsumo justo debajo de Paneles Solares
+  const esData = window.energySavingsData || null;
+  const esMode = esData?.config?.mode || "auto";
+  const esModeMeta = {
+    auto: { label: "Autoconsumo Activo", bg: "rgba(16,185,129,0.20)", color: "#10b981" },
+    paused: { label: "Pausado", bg: "rgba(245,158,11,0.20)", color: "#f59e0b" },
+    vacation: { label: "Vacaciones", bg: "rgba(59,130,246,0.20)", color: "#3b82f6" }
+  }[esMode] || { label: "Autoconsumo", bg: "rgba(16,185,129,0.20)", color: "#10b981" };
+  const firstRule = (esData?.rules_status || []).find(r => r.enabled) || (esData?.rules_status || [])[0];
+  const esSummaryLine = firstRule
+    ? `${firstRule.icon || "⚡"} ${firstRule.name}: ${firstRule.status_label}`
+    : "Pulsa para configurar reglas solares";
+  const esSavedKwh = esData?.summary?.total_saved_kwh_today ?? 0;
+  const esMeterTxt = esData?.telemetry?.meter_online ? "Doble pinza activa" : "Vía Hoymiles (listo para pinza)";
+  const esShortMode = { auto: "Activo", paused: "Pausa", vacation: "Vacac." }[esMode] || "Activo";
+  htmlParts.push(`
+    <div class="liquid-card energy-savings-compact-card" data-devid="energy_savings" style="cursor:pointer; padding:0.52rem 0.68rem; gap:0.22rem; min-height:0;" title="Programar ahorro y autoconsumo inteligente">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:0.35rem;">
+        <div style="display:flex; align-items:center; gap:0.35rem; min-width:0;">
+          <span style="font-size:0.95rem; line-height:1;">🌱</span>
+          <span style="font-size:0.78rem; font-weight:700; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Ahorro Solar</span>
+        </div>
+        <span style="font-size:0.65rem; padding:0.12rem 0.42rem; border-radius:999px; background:${esModeMeta.bg}; color:${esModeMeta.color}; font-weight:700; white-space:nowrap;">${esShortMode}</span>
+      </div>
+      <div style="font-size:0.69rem; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2;">${esSummaryLine}</div>
+      <div style="display:flex; align-items:center; justify-content:space-between; font-size:0.68rem; color:var(--text-secondary); margin-top:0.05rem;">
+        <span>Hoy: <b>${esSavedKwh} kWh</b></span>
+        <span style="color:#0284c7; font-weight:600;">Reglas ›</span>
+      </div>
+    </div>
+  `);
 
   if (showBat) {
     const hiddenClass = (isEditMode && isDeviceHidden("energy_battery_20v")) ? "control-hidden-in-edit" : "";
@@ -1667,11 +1786,20 @@ function renderEnergyGrid() {
       });
     });
   } else {
-    container.querySelectorAll(".climate-vertical-card").forEach(card => {
-      card.style.cursor = "pointer";
-      card.addEventListener("click", () => {
-        openClimateHistoryModal();
-      });
+    container.querySelectorAll(".liquid-card").forEach(card => {
+      const devid = card.getAttribute("data-devid");
+      if (devid === "energy_solar") {
+        card.style.cursor = "pointer";
+        card.setAttribute("title", "Abrir detalles de producción solar");
+        card.addEventListener("click", () => {
+          openSolarModal();
+        });
+      } else if (devid === "energy_savings") {
+        card.style.cursor = "pointer";
+        card.addEventListener("click", () => {
+          openEnergySavingsModal();
+        });
+      }
     });
   }
 }
@@ -1741,23 +1869,25 @@ function renderSecurityGrid() {
   let htmlParts = [];
   if (showAlarm) {
     const hiddenClass = (isEditMode && isDeviceHidden("security_alarm")) ? "control-hidden-in-edit" : "";
+    const isArmed = alarmMode !== "disarmed";
+    const statusTxt = isArmed ? (alarmMode === "home" ? "En Casa" : "ARMADA") : "Desarmada";
     htmlParts.push(`
-      <div class="liquid-card ${alarmMode !== 'disarmed' ? 'is-on' : ''} ${hiddenClass}" data-devid="security_alarm" style="cursor: ${isEditMode ? 'pointer' : 'default'};">
-        ${getEditBadgeHtml("security_alarm")}
-        <div class="card-top">
+      <div class="liquid-card sec-horiz-card ${isArmed ? 'is-on' : ''} ${hiddenClass}" id="card-security-alarm" data-devid="security_alarm" style="cursor:pointer;" title="Pulsa para abrir el panel completo de Alarma, accesorios y log de eventos">
+        ${getEditBadgeHtml("security_alarm", null, false)}
+        <div class="sec-horiz-left">
           <div class="card-icon-bubble">🛡️</div>
-          <span class="sub-metric-pill">${alarmMode === 'disarmed' ? 'Desarmada' : 'ARMADA'}</span>
-        </div>
-        <div class="card-title-group">
-          <h4>Alarma Inteligente</h4>
-          <div class="alarm-icon-actions">
-            <button type="button" class="liquid-action-pill alarm-icon-btn ${alarmMode === 'disarmed' ? 'is-disarm-active' : ''}" id="btn-alarm-disarm" title="Desarmar alarma" aria-label="Desarmar">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>
-            </button>
-            <button type="button" class="liquid-action-pill alarm-icon-btn ${alarmMode !== 'disarmed' ? 'is-arm-active' : ''}" id="btn-alarm-arm" title="Armar alarma" aria-label="Armar">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            </button>
+          <div class="sec-horiz-info">
+            <h4>Alarma Inteligente</h4>
+            <div class="sec-horiz-sub" style="color:${isArmed ? '#ef4444' : '#10b981'}; font-weight:700;">${statusTxt} · <span style="color:var(--modal-text-muted); font-weight:500;">Accesorios & Log ›</span></div>
           </div>
+        </div>
+        <div class="sec-horiz-right">
+          <button type="button" class="liquid-action-pill alarm-icon-btn alarm-btn-disarm ${!isArmed ? 'is-disarm-active' : ''}" id="btn-alarm-disarm" title="Desarmar alarma" aria-label="Desarmar">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>
+          </button>
+          <button type="button" class="liquid-action-pill alarm-icon-btn alarm-btn-arm ${isArmed ? 'is-arm-active' : ''}" id="btn-alarm-arm" title="Armar alarma" aria-label="Armar">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </button>
         </div>
       </div>
     `);
@@ -1766,15 +1896,17 @@ function renderSecurityGrid() {
   if (showDoor) {
     const hiddenClass = (isEditMode && isDeviceHidden("security_door")) ? "control-hidden-in-edit" : "";
     htmlParts.push(`
-      <div class="liquid-card ${doorOpen ? 'is-on' : ''} ${hiddenClass}" data-devid="security_door" style="cursor: ${isEditMode ? 'pointer' : 'default'};">
-        ${getEditBadgeHtml("security_door")}
-        <div class="card-top">
+      <div class="liquid-card sec-horiz-card ${doorOpen ? 'is-on' : ''} ${hiddenClass}" id="card-security-door" data-devid="security_door" style="cursor:pointer;" title="Pulsa para ver el esquema de accesos y seguridad">
+        ${getEditBadgeHtml("security_door", null, false)}
+        <div class="sec-horiz-left">
           <div class="card-icon-bubble">${doorOpen ? '🚪⚠️' : '🚪'}</div>
-          <span class="sub-metric-pill">${doorOpen ? '¡ABIERTA!' : 'Cerrada'}</span>
+          <div class="sec-horiz-info">
+            <h4>Puerta Principal</h4>
+            <div class="sec-horiz-sub">Sensor Magnético · Entrada</div>
+          </div>
         </div>
-        <div class="card-title-group">
-          <h4>Puerta Entrada Principal</h4>
-          <span class="card-subtitle">Sensor Magnético Tuya Zigbee</span>
+        <div class="sec-horiz-right">
+          <span class="sub-metric-pill" style="${doorOpen ? 'color:#ef4444; border-color:rgba(239,68,68,0.45); background:rgba(239,68,68,0.12); font-weight:800;' : 'color:#10b981; border-color:rgba(16,185,129,0.4);'}">${doorOpen ? '¡ABIERTA!' : 'Cerrada'}</span>
         </div>
       </div>
     `);
@@ -1788,16 +1920,17 @@ function renderSecurityGrid() {
     const blockedQ = ag.online ? (ag.num_blocked_filtering ?? 0) : "--";
     const pctQ = ag.online ? (ag.block_pct ?? 0) : "--";
     htmlParts.push(`
-      <div class="liquid-card ${protOn ? "is-on" : ""} ${hiddenClass}" id="card-security-adguard" data-devid="security_adguard" style="cursor:pointer;">
+      <div class="liquid-card sec-horiz-card ${protOn ? "is-on" : ""} ${hiddenClass}" id="card-security-adguard" data-devid="security_adguard" style="cursor:pointer;">
         ${getEditBadgeHtml("security_adguard", null, false)}
-        <div class="card-top">
+        <div class="sec-horiz-left">
           <div class="card-icon-bubble">🛡️</div>
-          <span class="sub-metric-pill" style="${protOn ? "color:#10b981; border-color:rgba(16,185,129,0.45);" : ""}">${ag.online ? (protOn ? "Activo" : "Pausado") : "Offline"}</span>
+          <div class="sec-horiz-info">
+            <h4>AdGuard Home</h4>
+            <div class="sec-horiz-sub"><b>${blockedQ} bloq. (${pctQ}%)</b> · ${totalQ} DNS</div>
+          </div>
         </div>
-        <div class="card-title-group">
-          <h4>AdGuard Home</h4>
-          <div style="font-size:0.92rem; font-weight:700; margin:2px 0;">${blockedQ} bloq. (${pctQ}%)</div>
-          <span class="card-subtitle">${totalQ} DNS · Detalles →</span>
+        <div class="sec-horiz-right">
+          <span class="sub-metric-pill" style="${protOn ? "color:#10b981; border-color:rgba(16,185,129,0.45);" : ""}">${ag.online ? (protOn ? "Activo ›" : "Pausado") : "Offline"}</span>
         </div>
       </div>
     `);
@@ -1815,6 +1948,12 @@ function renderSecurityGrid() {
     return;
   }
 
+  document.getElementById("card-security-alarm")?.addEventListener("click", () => {
+    openAlarmModal();
+  });
+  document.getElementById("card-security-door")?.addEventListener("click", () => {
+    openAlarmModal();
+  });
   document.getElementById("card-security-adguard")?.addEventListener("click", () => {
     openAdguardModal();
   });
@@ -2128,6 +2267,11 @@ function connectWebSocket() {
         if (msg.cameraId) stopCameraLive(msg.cameraId);
       } else if (msg.type === "PHOTOS_UPDATED") {
         refreshSdPhotosSilently(msg.file);
+      } else if (msg.type === "OPEN_MODAL") {
+        fetch("/api/debug_log", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({got_modal: msg.modal, has_fn: typeof openAlarmDetailsModal})}).catch(()=>{});
+        if (msg.modal === "alarm") openAlarmDetailsModal();
+        else if (msg.modal === "photo") typeof openPhotoSourceModal === "function" && openPhotoSourceModal();
+        else if (msg.modal === "solar") typeof openSolarModal === "function" && openSolarModal();
       } else if (msg.type === "REMOTE_CLICK") {
         dispatchSyntheticTap(msg.x, msg.y);
       } else if (msg.type === "PHYSICAL_TOUCH_POINT") {
@@ -2160,7 +2304,21 @@ function connectWebSocket() {
       } else if (msg.type === "FAMILY_MESSAGE") {
         showFamilyMessage(msg.sender, msg.text, msg.timestamp);
       } else if (msg.type === "DOORBELL_ALERT") {
-        triggerDoorbellAlert(msg.title, msg.stream_data || msg.stream_url, msg.cameraId);
+        triggerDoorbellAlert(msg.title, msg.stream_data || msg.stream_url, msg.cameraId, msg.ringing !== false);
+      } else if (msg.type === "DOORBELL_CHIME_STATE") {
+        setDoorbellSilenceBtnVisible(!!msg.ringing);
+      } else if (msg.type === "AUDIO_VOLUMES_UPDATED") {
+        applyAudioVolumesToUI(msg.volumes || {});
+      } else if (msg.type === "ENERGY_SAVINGS_UPDATED") {
+        window.energySavingsData = msg.data || null;
+        if (typeof renderEnergyGrid === "function") renderEnergyGrid();
+      } else if (msg.type === "DOCTOR_SPEAK_STATE") {
+        doctorIsSpeaking = !!msg.speaking;
+        const btn = document.getElementById("btn-doctor-speak");
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = doctorIsSpeaking ? "⏹ Parar Lectura" : "🔊 Leer Informe";
+        }
       }
     } catch (e) {
       console.error("WS Parse Error:", e);
@@ -2220,12 +2378,48 @@ function playDoorbellChime() {
   } catch (e) {}
 }
 
-function triggerDoorbellAlert(title, streamUrl, cameraId) {
-  if (!(camFsModalEl && camFsModalEl.style.display === "flex" && currentFullscreenCamId === (cameraId || "bf77eed8534deaf66f2xpj"))) {
-    playDoorbellChime();
+let doorbellChimeHideTimer = null;
+let isDoorbellChimeActive = false;
+
+function setDoorbellSilenceBtnVisible(visible) {
+  isDoorbellChimeActive = !!visible;
+  const btn = document.getElementById("btn-cam-fs-silence-chime");
+  if (!btn) return;
+  if (doorbellChimeHideTimer) {
+    clearTimeout(doorbellChimeHideTimer);
+    doorbellChimeHideTimer = null;
   }
+  if (visible) {
+    btn.classList.remove("hidden");
+    btn.style.display = "inline-flex";
+    btn.disabled = false;
+    btn.textContent = "🔕 Silenciar Timbre";
+    doorbellChimeHideTimer = setTimeout(() => {
+      setDoorbellSilenceBtnVisible(false);
+    }, 19000);
+  } else {
+    btn.classList.add("hidden");
+    btn.style.display = "none";
+  }
+}
+
+async function silenceDoorbellChime() {
+  setDoorbellSilenceBtnVisible(false);
+  try {
+    await fetch("/api/doorbell/silence", { method: "POST" });
+  } catch (e) {}
+}
+
+document.getElementById("btn-cam-fs-silence-chime")?.addEventListener("click", () => {
+  silenceDoorbellChime();
+});
+
+function triggerDoorbellAlert(title, streamUrl, cameraId, ringing = true) {
   const camId = cameraId || "bf77eed8534deaf66f2xpj";
   openCameraFullscreen(camId, title || "🔔 ¡Timbre! Videoportero Exterior", true, streamUrl);
+  if (ringing) {
+    setDoorbellSilenceBtnVisible(true);
+  }
 }
 
 document.getElementById("doorbell-dismiss-btn")?.addEventListener("click", () => {
@@ -2240,7 +2434,8 @@ async function updateBattery() {
     const res = await fetch("/api/status");
     if (res.ok) {
       const data = await res.json();
-      const cap = data.battery?.capacity ?? "--";
+      const rawCap = data.battery?.capacity ?? "--";
+      const cap = typeof rawCap === "number" ? Math.min(100, Math.max(0, rawCap)) : rawCap;
       document.getElementById("battery-pct").textContent = `${cap}%`;
       const isCharging = data.battery?.status === "Charging" || data.battery?.status === "Full";
       const bEl = document.getElementById("battery-icon"); if (bEl) { bEl.className = isCharging ? 'neon-svg neon-amber' : 'neon-svg neon-emerald'; bEl.innerHTML = isCharging ? SVG_BOLT : SVG_BATTERY; }
@@ -2410,7 +2605,18 @@ camerasModalEl?.addEventListener("click", (e) => {
   if (e.target === camerasModalEl) closeCamerasModal();
 });
 
+let doorbellAutoCloseTimer = null;
+
 window.closeCameraFullscreen = function() {
+  if (doorbellAutoCloseTimer) {
+    clearTimeout(doorbellAutoCloseTimer);
+    doorbellAutoCloseTimer = null;
+  }
+  if (isDoorbellChimeActive) {
+    silenceDoorbellChime();
+  } else {
+    setDoorbellSilenceBtnVisible(false);
+  }
   currentFullscreenCamId = null;
   if (fullscreenHls) {
     try { fullscreenHls.destroy(); } catch (e) {}
@@ -2430,7 +2636,7 @@ btnCamFsAudio?.addEventListener("click", () => {
   const vid = document.getElementById("cam-fs-video");
   if (vid) {
     vid.muted = !fullscreenAudioEnabled;
-    if (fullscreenAudioEnabled) vid.volume = 1.0;
+    if (fullscreenAudioEnabled) vid.volume = Math.max(0, Math.min(1, (window.domosAudioVolumes?.cameras ?? 85) / 100));
   }
   btnCamFsAudio.textContent = fullscreenAudioEnabled ? "🔊 Audio Activo" : "🔇 Audio Silenciado";
 });
@@ -2449,10 +2655,23 @@ window.openCameraFullscreen = async function(camId, title, isDoorbellAlert = fal
   fullscreenAudioEnabled = true;
   if (btnCamFsAudio) btnCamFsAudio.textContent = "🔊 Audio Activo";
   if (camFsTitle) camFsTitle.textContent = title || "Cámara en Directo";
+  if (doorbellAutoCloseTimer) {
+    clearTimeout(doorbellAutoCloseTimer);
+    doorbellAutoCloseTimer = null;
+  }
   if (camFsBadge) {
-    camFsBadge.textContent = isDoorbellAlert ? "🔔 TIMBRE ACTIVO · AUDIO EN VIVO" : "PANTALLA COMPLETA";
+    camFsBadge.textContent = isDoorbellAlert ? "🔔 TIMBRE ACTIVO · CIERRE AUTO 60s" : "PANTALLA COMPLETA";
     camFsBadge.style.background = isDoorbellAlert ? "rgba(239,68,68,0.28)" : "rgba(0,229,255,0.18)";
     camFsBadge.style.color = isDoorbellAlert ? "#fca5a5" : "#00e5ff";
+  }
+  if (isDoorbellAlert) {
+    doorbellAutoCloseTimer = setTimeout(() => {
+      if (camFsModalEl && camFsModalEl.style.display === "flex") {
+        window.closeCameraFullscreen();
+      }
+    }, 60000);
+  } else {
+    setDoorbellSilenceBtnVisible(false);
   }
 
   camFsModalEl.classList.remove("hidden");
@@ -2478,7 +2697,7 @@ window.openCameraFullscreen = async function(camId, title, isDoorbellAlert = fal
     camFsViewport.innerHTML = `<video id="cam-fs-video" autoplay playsinline controls style="width:100%; height:100%; object-fit:contain; background:#000;"></video>`;
     const vid = document.getElementById("cam-fs-video");
     vid.muted = !fullscreenAudioEnabled;
-    vid.volume = 1.0;
+    vid.volume = Math.max(0, Math.min(1, (window.domosAudioVolumes?.cameras ?? 85) / 100));
 
     fullscreenHls = await attachLiveStream(vid, camId, streamData);
   } catch (e) {
@@ -2746,14 +2965,15 @@ function syncPhotoSourceModalUI() {
   }
 }
 
-document.getElementById("hud-photo-badge")?.addEventListener("click", async () => {
+async function openPhotoSourceModal() {
   const m = document.getElementById("photo-source-modal");
   if (!m) return;
   await loadFolders();
   syncPhotoSourceModalUI();
   m.classList.remove("hidden");
   m.style.display = "flex";
-});
+}
+document.getElementById("hud-photo-badge")?.addEventListener("click", openPhotoSourceModal);
 
 document.getElementById("btn-photo-modal-close")?.addEventListener("click", () => {
   const m = document.getElementById("photo-source-modal");
@@ -2862,11 +3082,28 @@ function renderSolarModalContent(solar, battery, extra, power) {
   const updated = s.updated_at ? new Date(s.updated_at).toLocaleTimeString("es-ES") : (p.updated_at || "—");
 
   // Power Consumption Metrics
-  const totalConsW = p.total_consumption_watts !== undefined ? p.total_consumption_watts : "--";
-  const netBalW = p.net_balance_watts !== undefined ? p.net_balance_watts : "--";
-  const isSurplus = typeof netBalW === "number" && netBalW >= 0;
-  const netLabel = isSurplus ? `+${netBalW} W Excedente Solar` : `${netBalW} W Importación de Red`;
+  const isChint = Boolean(p.has_meter && (p.total_consumption_watts > 0 || (s.home_consumption_w && s.home_consumption_w > 0)));
+  const totalConsW = typeof p.total_consumption_watts === "number" ? p.total_consumption_watts : 0;
+  const solarW = typeof s.watts === "number" ? s.watts : 0;
+  const netBalNum = typeof p.net_balance_watts === "number" ? p.net_balance_watts : (solarW - totalConsW);
+  const isSurplus = netBalNum >= 0;
+  const netBalText = `${Math.abs(Math.round(netBalNum))} W`;
+
+  // Autoconsumo: Minimo entre lo generado y lo consumido
+  const autoconsumoW = Math.max(0, Math.round(Math.min(solarW, totalConsW)));
+
+  // Cobertura: % del consumo cubierto por solar
+  const coberturaPct = totalConsW > 0 
+    ? Math.min(100, Math.round((autoconsumoW / totalConsW) * 100)) + "%"
+    : (solarW > 0 ? "100%" : "0%");
+
+  const netLabel = isSurplus
+    ? `+${netBalText} Excedente Inyectado a Red`
+    : `${netBalText} Importación de Red`;
   const netColor = isSurplus ? "#10b981" : "#38bdf8";
+  const consTitle = isChint ? "Consumo Vivienda (CHINT)" : "Consumo Monitorizado";
+  const consSub = isChint ? "⚡ Medidor General Vivienda" : "Enchufes y Cargas";
+  const chintStatus = isChint ? "🟢 En Línea (RS-485 Modbus)" : "🟡 Esperando Medidor (RS-485)";
 
   // Monitored Devices List
   const devList = (p.devices || []).map(d => {
@@ -2897,9 +3134,9 @@ function renderSolarModalContent(solar, battery, extra, power) {
         <div style="font-size:0.75rem; color:var(--modal-text-muted);">${statusLabel}</div>
       </div>
       <div class="domos-modal-subcard" style="padding:0.85rem; border-radius:16px;">
-        <div style="font-size:0.74rem; color:var(--modal-text-muted); text-transform:uppercase; font-weight:600;">Consumo Monitorizado</div>
+        <div style="font-size:0.74rem; color:var(--modal-text-muted); text-transform:uppercase; font-weight:600;">${consTitle}</div>
         <div style="font-size:1.55rem; font-weight:800; color:#38bdf8; margin-top:2px;">${totalConsW} W</div>
-        <div style="font-size:0.75rem; color:var(--modal-text-muted);">Enchufes y Cargas</div>
+        <div style="font-size:0.75rem; color:${isChint ? '#10b981' : 'var(--modal-text-muted)'}; font-weight:${isChint ? '600' : 'normal'};">${consSub}</div>
       </div>
       <div class="domos-modal-subcard" style="padding:0.85rem; border-radius:16px;">
         <div style="font-size:0.74rem; color:var(--modal-text-muted); text-transform:uppercase; font-weight:600;">Energía Solar Total</div>
@@ -2908,11 +3145,71 @@ function renderSolarModalContent(solar, battery, extra, power) {
       </div>
     </div>
 
+    <!-- Desglose Microinversor Hoymiles -->
+    ${(ex.port1_watts !== undefined || (s.port1 && s.port1.watts !== undefined)) ? `
+    <div class="domos-modal-subcard" style="padding:0.85rem 1rem; border-radius:16px; background:rgba(251,191,36,0.04); border:1px solid rgba(251,191,36,0.25);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem;">
+        <div style="font-size:0.75rem; color:#fbbf24; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">⚡ Microinversor Hoymiles (HMS)</div>
+        <div style="font-size:0.72rem; color:var(--modal-text-muted);">S/N: <b>${ex.inverter_sn || s.inverter_sn || '1164749041'}</b> · Temp: <b>${ex.temperature ?? s.temperature ?? '--'} °C</b></div>
+      </div>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap:0.65rem;">
+        <div class="domos-mini-stat">
+          <div style="font-size:0.72rem; color:var(--modal-text-muted); font-weight:600;">PANEL 1</div>
+          <div style="font-size:1.15rem; font-weight:800; color:#fbbf24; margin-top:2px;">${ex.port1_watts ?? s.port1?.watts ?? '--'} W</div>
+          <div style="font-size:0.7rem; color:var(--modal-text-muted);">${ex.port1_volts ?? s.port1?.volts ?? '--'} V · ${ex.port1_amps ?? s.port1?.amps ?? '--'} A</div>
+        </div>
+        <div class="domos-mini-stat">
+          <div style="font-size:0.72rem; color:var(--modal-text-muted); font-weight:600;">PANEL 2</div>
+          <div style="font-size:1.15rem; font-weight:800; color:#fbbf24; margin-top:2px;">${ex.port2_watts ?? s.port2?.watts ?? '--'} W</div>
+          <div style="font-size:0.7rem; color:var(--modal-text-muted);">${ex.port2_volts ?? s.port2?.volts ?? '--'} V · ${ex.port2_amps ?? s.port2?.amps ?? '--'} A</div>
+        </div>
+        ${(ex.port3_watts !== undefined || (s.port3 && s.port3.watts !== undefined)) ? `
+        <div class="domos-mini-stat">
+          <div style="font-size:0.72rem; color:var(--modal-text-muted); font-weight:600;">PANEL 3</div>
+          <div style="font-size:1.15rem; font-weight:800; color:#fbbf24; margin-top:2px;">${ex.port3_watts ?? s.port3?.watts ?? '--'} W</div>
+          <div style="font-size:0.7rem; color:var(--modal-text-muted);">${ex.port3_volts ?? s.port3?.volts ?? '--'} V · ${ex.port3_amps ?? s.port3?.amps ?? '--'} A</div>
+        </div>
+        <div class="domos-mini-stat">
+          <div style="font-size:0.72rem; color:var(--modal-text-muted); font-weight:600;">PANEL 4</div>
+          <div style="font-size:1.15rem; font-weight:800; color:#fbbf24; margin-top:2px;">${ex.port4_watts ?? s.port4?.watts ?? '--'} W</div>
+          <div style="font-size:0.7rem; color:var(--modal-text-muted);">${ex.port4_volts ?? s.port4?.volts ?? '--'} V · ${ex.port4_amps ?? s.port4?.amps ?? '--'} A</div>
+        </div>
+        ` : ''}
+      </div>
+    </div>
+    ` : ''}
+
+    <!-- Sección Medidor General CHINT -->
+    <div class="domos-modal-subcard" style="padding:0.85rem 1rem; border-radius:16px; background:rgba(16,185,129,0.04); border:1px solid rgba(16,185,129,0.25);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem;">
+        <div style="font-size:0.75rem; color:#10b981; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">⚡ Contador de Red General (CHINT DDSU666)</div>
+        <div style="font-size:0.72rem; color:var(--modal-text-muted);">${chintStatus}</div>
+      </div>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:0.65rem;">
+        <div class="domos-mini-stat">
+          <div style="font-size:0.72rem; color:var(--modal-text-muted); font-weight:600;">FLUJO ACOMETIDA RED</div>
+          <div style="font-size:1.15rem; font-weight:800; color:${isChint ? netColor : '#94a3b8'}; margin-top:2px;">${isChint ? (isSurplus ? '-' + netBalText : '+' + netBalText) : '-- W'}</div>
+          <div style="font-size:0.7rem; color:var(--modal-text-muted);">${isChint ? (isSurplus ? 'Exportando a Red' : 'Importando de Red') : 'Sin lectura activa en DTU'}</div>
+        </div>
+        <div class="domos-mini-stat">
+          <div style="font-size:0.72rem; color:var(--modal-text-muted); font-weight:600;">AUTOCONSUMO SOLAR</div>
+          <div style="font-size:1.15rem; font-weight:800; color:#38bdf8; margin-top:2px;">${isChint ? autoconsumoW + ' W' : (solarW > 0 ? Math.round(solarW) + ' W (Est.)' : '0 W')}</div>
+          <div style="font-size:0.7rem; color:var(--modal-text-muted);">${isChint ? 'Aprovechado en Directo' : 'Absorbido por la vivienda'}</div>
+        </div>
+        <div class="domos-mini-stat">
+          <div style="font-size:0.72rem; color:var(--modal-text-muted); font-weight:600;">COBERTURA SOLAR</div>
+          <div style="font-size:1.15rem; font-weight:800; color:#10b981; margin-top:2px;">${isChint ? coberturaPct : (solarW > 0 ? 'Cubriendo Cargas' : '0%')}</div>
+          <div style="font-size:0.7rem; color:var(--modal-text-muted);">${isChint ? 'Autosuficiencia Actual' : 'Alimentando el hogar'}</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Fila 2: Balance Neto Hogar -->
     <div class="domos-modal-subcard" style="padding:0.95rem 1.15rem; border-radius:18px; display:flex; justify-content:space-between; align-items:center; background:linear-gradient(135deg, rgba(255,255,255,0.04), rgba(56,189,248,0.06)); border:1px solid rgba(56,189,248,0.25);">
       <div>
         <div style="font-size:0.75rem; color:var(--modal-text-muted); text-transform:uppercase; font-weight:600;">Balance Energético en Tiempo Real</div>
-        <div style="font-size:1.25rem; font-weight:800; color:${netColor}; margin-top:2px;">${netLabel}</div>
+        <div style="font-size:1.25rem; font-weight:800; color:${isChint ? netColor : '#38bdf8'}; margin-top:2px;">${isChint ? netLabel : '⚡ ' + solarW + ' W Generación Solar'}</div>
+        ${!isChint ? `<div style="font-size:0.72rem; color:var(--modal-text-muted); margin-top:2px;">Prioridad total a consumos de la casa antes de exportar a red</div>` : ''}
       </div>
       <button class="liquid-action-pill" id="btn-solar-to-schedules" style="font-size:0.78rem; padding:0.4rem 0.8rem; cursor:pointer; color:#38bdf8; border-color:rgba(56,189,248,0.4);">
         ⏱️ Programación
@@ -2927,12 +3224,33 @@ function renderSolarModalContent(solar, battery, extra, power) {
       </div>
     </div>
 
+    <!-- Fila 3.5: Gráfica de Consumo por Enchufe (Diario / Mensual / Anual) -->
+    <div class="domos-modal-subcard" id="plug-power-chart-card" style="padding:0.95rem 1.15rem; border-radius:18px; display:flex; flex-direction:column; gap:0.65rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+        <div>
+          <div id="plug-chart-title" style="font-size:0.86rem; font-weight:700; color:var(--modal-text);">📊 Evolución de Consumo por Enchufe (kWh)</div>
+          <div id="plug-chart-subtitle" style="font-size:0.72rem; color:var(--modal-text-muted);">Cada curva representa un enchufe con medidor integrado</div>
+        </div>
+        <div class="plug-period-tabs" style="display:inline-flex; background:rgba(148,163,184,0.16); padding:3px; border-radius:11px; gap:3px;">
+          <button type="button" class="plug-period-btn" data-period="daily">Diario</button>
+          <button type="button" class="plug-period-btn" data-period="monthly">Mensual</button>
+          <button type="button" class="plug-period-btn" data-period="yearly">Anual</button>
+        </div>
+      </div>
+      <div id="plug-chart-legend" style="display:flex; flex-wrap:wrap; gap:0.4rem;"></div>
+      <div id="plug-chart-svg-wrap" style="position:relative; width:100%; height:225px;">
+        <p style="font-size:0.8rem; color:var(--modal-text-muted); margin:0;">Cargando curvas de consumo...</p>
+      </div>
+    </div>
+
     <!-- Fila 4: Red y Medidor -->
     <div style="padding:0.75rem 1rem; border-radius:14px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center;">
       <span style="font-size:0.78rem; color:var(--modal-text-muted);">Tensión de Red: <strong style="color:var(--modal-text);">${volts} V</strong> · Disyuntor: ${breaker}</span>
       <span style="font-size:0.75rem; color:var(--modal-text-muted);">Actualizado: ${updated}</span>
     </div>
   `;
+
+  initPlugPowerChartControls();
 
   document.getElementById("btn-solar-to-schedules")?.addEventListener("click", () => {
     const sModal = document.getElementById("solar-modal");
@@ -3770,6 +4088,7 @@ function drawClimateChart(hoverIndex = climateChartHoverIndex) {
 }
 
 // Controls & Listeners
+document.getElementById("btn-open-climate-history")?.addEventListener("click", () => openClimateHistoryModal());
 document.getElementById("btn-climate-modal-close")?.addEventListener("click", closeClimateHistoryModal);
 document.getElementById("climate-history-modal")?.addEventListener("click", (e) => {
   if (e.target.id === "climate-history-modal") closeClimateHistoryModal();
@@ -3898,20 +4217,31 @@ if (modalTransitionSel) {
 const RADIO_STATIONS = [
   { id: "cadena100", name: "Cadena 100", genre: "Éxitos Pop", icon: "🎵", url: "https://cadena100-streamers-mp3.flumotion.com/cope/cadena100.mp3" },
   { id: "europafm", name: "Europa FM", genre: "Pop & Actualidad", icon: "🎧", url: "https://atres-live.europafm.com/live/europafm/bitrate_1.m3u8" },
-  { id: "radioplaneta", name: "Radio Planeta", genre: "Música & Entretenimiento", icon: "🪐", url: "http://radioplaneta.emitironline.com/radio" },
-  { id: "locafm", name: "Loca FM", genre: "Dance & Electrónica", icon: "⚡", url: "http://s02.fjperezdj.com:8066/live" },
+  { id: "radioplaneta", name: "Radio Planeta", genre: "Música & Entretenimiento", icon: "🪐", url: "https://radioplaneta.emitironline.com/radio" },
+  { id: "locafm", name: "Loca FM", genre: "Dance & Electrónica", icon: "⚡", url: "https://s02.fjperezdj.com:8066/live" },
   { id: "los40", name: "LOS40", genre: "Top Hits España", icon: "🔥", url: "https://playerservices.streamtheworld.com/api/livestream-redirect/LOS40.mp3" },
   { id: "cadenaser", name: "Cadena SER", genre: "Noticias & Deportes", icon: "🎙️", url: "https://playerservices.streamtheworld.com/api/livestream-redirect/CADENASER.mp3" },
   { id: "cope", name: "COPE", genre: "Actualidad & Opinión", icon: "📻", url: "https://net1-cope-rrcast.flumotion.com/cope/net1.mp3" },
   { id: "ondacero", name: "Onda Cero", genre: "Magazines & Noticias", icon: "🌊", url: "https://atres-live.ondacero.es/live/ondacero/bitrate_1.m3u8" },
   { id: "radio3", name: "RNE Radio 3", genre: "Indie & Cultura", icon: "🎸", url: "https://rtvelivestream.rtve.es/rtvesec/rne/rne_r3_main.m3u8" },
   { id: "kissfm", name: "Kiss FM", genre: "Clásicos 80s-2000s", icon: "💋", url: "https://bbkissfm.kissfmradio.cires21.com/bbkissfm.mp3" },
-  { id: "chillout", name: "Antenne Chillout", genre: "Chillout & Lounge", icon: "🛋️", url: "http://mp3channels.webradio.antenne.de/chillout" },
+  { id: "chillout", name: "Antenne Chillout", genre: "Chillout & Lounge", icon: "🛋️", url: "https://s6-webradio.antenne.de/chillout" },
   { id: "groovesalad", name: "SomaFM Groove Salad", genre: "Lo-Fi & Ambient", icon: "🌙", url: "https://hls.somafm.com/hls//gs-surround/program.m3u8" }
 ];
 
 let currentRadioId = null;
 let radioHls = null;
+let radioOutputTarget = (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost") ? "domos" : "domos";
+
+window.setRadioOutputTarget = function(target) {
+  radioOutputTarget = target || "domos";
+  document.querySelectorAll(".radio-target-btn").forEach(btn => {
+    const active = btn.getAttribute("data-target") === radioOutputTarget;
+    btn.style.background = active ? "rgba(14,165,233,0.25)" : "";
+    btn.style.borderColor = active ? "#38bdf8" : "";
+    btn.style.fontWeight = active ? "700" : "";
+  });
+};
 
 function renderRadioGrid() {
   const grid = document.getElementById("radio-stations-grid");
@@ -3945,14 +4275,7 @@ function renderRadioGrid() {
 }
 
 function stopRadio() {
-  const audio = document.getElementById("radio-audio-player");
-  if (radioHls) {
-    try { radioHls.destroy(); } catch (e) {}
-    radioHls = null;
-  }
-  if (audio) {
-    try { audio.pause(); audio.removeAttribute("src"); audio.load(); } catch (e) {}
-  }
+  fetch("/api/radio/stop", { method: "POST" }).catch(() => {});
   currentRadioId = null;
   const np = document.getElementById("radio-now-playing");
   if (np) np.textContent = "Selecciona una emisora para escuchar";
@@ -3962,35 +4285,49 @@ function stopRadio() {
 
 function playRadioStation(stationId) {
   const st = RADIO_STATIONS.find(s => s.id === stationId) || RADIO_STATIONS[0];
-  const audio = document.getElementById("radio-audio-player");
-  if (!st || !audio) return;
+  if (!st) return;
 
-  stopRadio();
   currentRadioId = st.id;
   const np = document.getElementById("radio-now-playing");
-  if (np) np.textContent = `🔊 Conectando con ${st.name}...`;
+  if (np) np.textContent = "🔊 Conectando " + st.name + " en Altavoz Asus...";
   document.getElementById("dock-radio-btn")?.classList.add("is-on");
   renderRadioGrid();
 
-  if (st.url.includes(".m3u8") && window.Hls && Hls.isSupported()) {
-    radioHls = new Hls({ enableWorker: true, lowLatencyMode: false });
-    radioHls.loadSource(st.url);
-    radioHls.attachMedia(audio);
-    radioHls.on(Hls.Events.MANIFEST_PARSED, () => {
-      audio.play().then(() => {
-        if (np) np.textContent = `🔊 Escuchando ${st.name} · ${st.genre}`;
-      }).catch(() => {});
-    });
-  } else {
-    audio.src = st.url;
-    audio.play().then(() => {
-      if (np) np.textContent = `🔊 Escuchando ${st.name} · ${st.genre}`;
-    }).catch(() => {
-      if (np) np.textContent = `⚠️ No se pudo conectar con ${st.name}`;
-    });
-  }
+  fetch("/api/radio/play", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: st.url, station: st.name, target: radioOutputTarget || "domos" })
+  }).then(res => res.json()).then(data => {
+    if (data.status === "error") {
+      currentRadioId = null;
+      document.getElementById("dock-radio-btn")?.classList.remove("is-on");
+      renderRadioGrid();
+      if (np) {
+        np.style.color = "#ef4444";
+        np.textContent = `❌ Error en stream (${st.name}): ${data.error || "Sin señal de audio"}`;
+      }
+      return;
+    }
+    if (np) {
+      np.style.color = "";
+      const mv = data.master_volume;
+      const rv = data.radio_volume;
+      const lowVolWarn = (typeof mv === "number" && mv <= 25) || (typeof rv === "number" && rv <= 10)
+        ? ` · ⚠️ Volumen bajo (General ${mv ?? "--"}% / Radio ${rv ?? "--"}%)`
+        : "";
+      const stPrefix = data.stream_verified ? "🔊 En directo" : "⏳ Conectando stream";
+      np.textContent = `${stPrefix}: ${st.name} · ${st.genre || ""}${lowVolWarn}`;
+    }
+  }).catch(() => {
+    currentRadioId = null;
+    document.getElementById("dock-radio-btn")?.classList.remove("is-on");
+    renderRadioGrid();
+    if (np) {
+      np.style.color = "#ef4444";
+      np.textContent = "⚠️ Error de red conectando con el servidor de audio DOMOS";
+    }
+  });
 }
-
 
 // --- Real Audio-Reactive Radio VU Meter (/ws/radio-vu) ---
 let radioVuWs = null;
@@ -4146,8 +4483,8 @@ function renderIrGrid() {
   container.innerHTML = irList.map(ir => {
     const isTv = ir.type === "infrared_tv";
     const keys = isTv
-      ? [["Power", "⏻ Power"], ["Volume-", "🔉 -"], ["Volume+", "🔊 +"], ["Channel-", "CH -"], ["Channel+", "CH +"], ["OK", "OK"], ["Home", "🏠 Home"]]
-      : [["PowerOn", "💡 Encender"], ["PowerOff", "⏻ Apagar"], ["Brightness+", "☀️ +"], ["Brightness-", "🔅 -"], ["WarmLight", "Cálida"], ["ColdLight", "Fría"]];
+      ? [["Power", "⏻ Power"], ["Volume-", "🔉 -"], ["Volume+", "🔊 +"], ["Channel-", "CH -"], ["Channel+", "CH +"], ["OK", "OK"], ["Back", "↩️ Atrás"], ["Home", "🏠 Home"]]
+      : [["PowerToggle", "💡 Encender / Apagar"]];
     return `
       <div class="liquid-card" data-devid="${ir.id}">
         <div class="card-top">
@@ -4401,8 +4738,8 @@ function buildControlCardHtml(item) {
   if (kind === "ir") {
     const isTv = dev.type === "infrared_tv";
     const keys = isTv
-      ? [["Power", "⏻ Power"], ["Volume-", "🔉 -"], ["Volume+", "🔊 +"], ["Channel-", "CH -"], ["Channel+", "CH +"], ["OK", "OK"], ["Home", "🏠 Home"]]
-      : [["PowerOn", "💡 Encender"], ["PowerOff", "⏻ Apagar"], ["Brightness+", "☀️ +"], ["Brightness-", "🔅 -"], ["WarmLight", "Cálida"], ["ColdLight", "Fría"]];
+      ? [["Power", "⏻ Power"], ["Volume-", "🔉 -"], ["Volume+", "🔊 +"], ["Channel-", "CH -"], ["Channel+", "CH +"], ["OK", "OK"], ["Back", "↩️ Atrás"], ["Home", "🏠 Home"]]
+      : [["PowerToggle", "💡 Encender / Apagar"]];
     return `
       <div class="liquid-card liquid-card-wide ${hiddenClass}" data-devid="${dev.id}" data-kind="ir">
         ${badgeHtml}
@@ -5311,3 +5648,2132 @@ async function refreshSdPhotosSilently(newestFile) {
   } catch (e) {}
 }
 setInterval(() => refreshSdPhotosSilently(null), 120000);
+
+// --- Alarm & Security Details Modal ---
+async function openAlarmDetailsModal() {
+  fetch("/api/debug_log", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({in_openAlarmDetailsModal: true, has_modal_el: Boolean(document.getElementById("alarm-details-modal"))})}).catch(()=>{});
+  const modal = document.getElementById("alarm-details-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  modal.style.display = "flex";
+
+  const body = document.getElementById("alarm-modal-body");
+  if (body) {
+    body.innerHTML = `
+      <div style="display:flex; justify-content:center; align-items:center; padding:2.5rem 0; gap:0.75rem; color:var(--modal-text-muted);">
+        <div class="kiosk-spinner" style="width:24px; height:24px; border:3px solid rgba(56,189,248,0.2); border-top-color:#38bdf8; border-radius:50%; animation:spin 0.8s linear infinite;"></div>
+        <span>Consultando diagnóstico y baterías de seguridad...</span>
+      </div>
+    `;
+  }
+
+  try {
+    const res = await fetch("/api/security/details");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    renderAlarmModalContent(data);
+  } catch (e) {
+    fetch("/api/debug_log", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({modal_err: e.message, stack: e.stack})}).catch(()=>{});
+    if (body) {
+      body.innerHTML = `
+        <div style="padding:1.5rem; text-align:center; color:#f87171; background:rgba(239,68,68,0.1); border-radius:18px;">
+          <p style="margin:0; font-weight:600;">No se pudo conectar con el servicio de seguridad (${e.message})</p>
+        </div>
+      `;
+    }
+  }
+}
+
+function renderAlarmModalContent(data) {
+  const body = document.getElementById("alarm-modal-body");
+  if (!body) return;
+
+  const mode = data.alarm_mode || "disarmed";
+  const sec = data.security_devices || {};
+  const lowBats = data.low_battery_warnings || [];
+  const inventory = data.battery_inventory || [];
+
+  let modeBadge = `<span style="background:rgba(16,185,129,0.2); color:#34d399; padding:0.35rem 0.85rem; border-radius:999px; font-weight:700; font-size:0.88rem; border:1px solid rgba(16,185,129,0.4);">DESARMADA</span>`;
+  if (mode === "arm") {
+    modeBadge = `<span style="background:rgba(239,68,68,0.25); color:#f87171; padding:0.35rem 0.85rem; border-radius:999px; font-weight:700; font-size:0.88rem; border:1px solid rgba(239,68,68,0.5);">🚨 TOTALMENTE ARMADA</span>`;
+  } else if (mode === "home") {
+    modeBadge = `<span style="background:rgba(245,158,11,0.25); color:#fbbf24; padding:0.35rem 0.85rem; border-radius:999px; font-weight:700; font-size:0.88rem; border:1px solid rgba(245,158,11,0.5);">🏠 ARMADA EN CASA</span>`;
+  }
+
+  // Low battery banner
+  let lowBatHtml = "";
+  if (lowBats.length > 0) {
+    const itemsList = lowBats.map(b => `
+      <li style="margin:0.25rem 0; font-size:0.86rem; color:#fca5a5;">
+        <strong>${b.name}</strong>: ${b.alarm_state === 'low_battery' ? '⚠️ Advertencia de batería baja emitida por el dispositivo' : 'Batería agotada/crítica (' + b.battery + '%)'}
+      </li>
+    `).join("");
+
+    lowBatHtml = `
+      <div style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.35); border-radius:18px; padding:0.9rem 1.15rem;">
+        <div style="display:flex; align-items:center; gap:0.5rem; font-weight:700; color:#f87171; font-size:0.95rem; margin-bottom:0.4rem;">
+          <span>⚠️ Aviso de Mantenimiento de Batería</span>
+        </div>
+        <ul style="margin:0; padding-left:1.2rem;">${itemsList}</ul>
+      </div>
+    `;
+  }
+
+  const door = sec.door || {};
+  const doorSt = door.state || {};
+  const lock = sec.lock || {};
+  const lockSt = lock.state || {};
+  const motion = sec.motion || {};
+  const motionSt = motion.state || {};
+  const pir = sec.pir || {};
+  const pirSt = pir.state || {};
+  const smoke = sec.smoke_co || {};
+  const smokeSt = smoke.state || {};
+  const vib = sec.vibration || {};
+  const vibSt = vib.state || {};
+
+  function batBadge(val) {
+    if (val === undefined || val === null) return `<span style="color:var(--modal-text-muted);">--</span>`;
+    if (typeof val === "number") {
+      const col = val > 50 ? "#34d399" : (val > 25 ? "#fbbf24" : "#f87171");
+      return `<span style="font-weight:700; color:${col};">${val}%</span>`;
+    }
+    const s = String(val).toLowerCase();
+    if (s.includes("high") || s.includes("alta")) return `<span style="color:#34d399; font-weight:700;">Alta</span>`;
+    if (s.includes("middle") || s.includes("media") || s.includes("normal")) return `<span style="color:#38bdf8; font-weight:700;">Normal</span>`;
+    if (s.includes("low") || s.includes("baja")) return `<span style="color:#f87171; font-weight:700;">Baja ⚠️</span>`;
+    return `<span style="font-weight:600;">${val}</span>`;
+  }
+
+  body.innerHTML = `
+    <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); border-radius:20px; padding:1.1rem 1.25rem; display:flex; flex-direction:column; gap:0.9rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.6rem;">
+        <div>
+          <div style="font-size:0.8rem; color:var(--modal-text-muted); font-weight:600; text-transform:uppercase; letter-spacing:0.04em;">Central de Alarma Tuya</div>
+          <div style="font-size:1.15rem; font-weight:700; margin-top:0.2rem; display:flex; align-items:center; gap:0.6rem;">
+            ${data.alarm_name} ${modeBadge}
+          </div>
+        </div>
+        <div style="font-size:0.85rem; color:var(--modal-text-muted);">
+          Batería Central: <strong>${data.alarm_battery}%</strong>
+        </div>
+      </div>
+      
+      <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:0.6rem;">
+        <button id="btn-alarm-disarm" class="liquid-action-pill" style="justify-content:center; padding:0.7rem; font-size:0.88rem; font-weight:700; cursor:pointer; background:${mode === 'disarmed' ? 'rgba(16,185,129,0.25)' : 'rgba(255,255,255,0.06)'}; border-color:${mode === 'disarmed' ? '#10b981' : 'rgba(255,255,255,0.12)'}; color:${mode === 'disarmed' ? '#34d399' : '#fff'};">
+          🔓 Desarmar
+        </button>
+        <button id="btn-alarm-home" class="liquid-action-pill" style="justify-content:center; padding:0.7rem; font-size:0.88rem; font-weight:700; cursor:pointer; background:${mode === 'home' ? 'rgba(245,158,11,0.25)' : 'rgba(255,255,255,0.06)'}; border-color:${mode === 'home' ? '#f59e0b' : 'rgba(255,255,255,0.12)'}; color:${mode === 'home' ? '#fbbf24' : '#fff'};">
+          🏠 En Casa
+        </button>
+        <button id="btn-alarm-arm" class="liquid-action-pill" style="justify-content:center; padding:0.7rem; font-size:0.88rem; font-weight:700; cursor:pointer; background:${mode === 'arm' ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.06)'}; border-color:${mode === 'arm' ? '#ef4444' : 'rgba(255,255,255,0.12)'}; color:${mode === 'arm' ? '#f87171' : '#fff'};">
+          🚨 Armar Todo
+        </button>
+      </div>
+    </div>
+
+    ${lowBatHtml}
+
+    <div style="display:flex; flex-direction:column; gap:0.6rem;">
+      <div style="font-size:0.85rem; font-weight:700; color:var(--modal-text-muted); text-transform:uppercase; letter-spacing:0.04em;">Sensores y Detectores</div>
+      
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:0.75rem;">
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:0.85rem 1rem; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:0.92rem; font-weight:600;">🚪 Puerta Principal</div>
+            <div style="font-size:0.8rem; color:${doorSt.is_open ? '#f87171' : '#34d399'}; font-weight:600; margin-top:0.2rem;">
+              ${doorSt.is_open ? '¡ABIERTA!' : 'Cerrada / Asegurada'}
+            </div>
+          </div>
+          <div style="text-align:right; font-size:0.8rem; color:var(--modal-text-muted);">
+            Batería<br>${batBadge(doorSt.battery)}
+          </div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:0.85rem 1rem; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:0.92rem; font-weight:600;">🔐 Cerradura Inteligente</div>
+            <div style="font-size:0.8rem; color:${lockSt.alarm_lock === 'low_battery' ? '#fbbf24' : '#34d399'}; font-weight:600; margin-top:0.2rem;">
+              ${lockSt.alarm_lock === 'low_battery' ? '⚠️ Aviso de Pila' : 'Cerrojo Normal'}
+            </div>
+          </div>
+          <div style="text-align:right; font-size:0.8rem; color:var(--modal-text-muted);">
+            Batería<br>${batBadge(lockSt.battery_state || lockSt.battery)}
+          </div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:0.85rem 1rem; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:0.92rem; font-weight:600;">🌿 Sensor Movimiento Patio</div>
+            <div style="font-size:0.8rem; color:#38bdf8; font-weight:600; margin-top:0.2rem;">
+              PIR Activo (Vigilancia)
+            </div>
+          </div>
+          <div style="text-align:right; font-size:0.8rem; color:var(--modal-text-muted);">
+            Batería<br>${batBadge(motionSt.battery)}
+          </div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:0.85rem 1rem; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:0.92rem; font-weight:600;">👀 Sensor PIR Interior</div>
+            <div style="font-size:0.8rem; color:#38bdf8; font-weight:600; margin-top:0.2rem;">
+              Sensor Infrarrojo
+            </div>
+          </div>
+          <div style="text-align:right; font-size:0.8rem; color:var(--modal-text-muted);">
+            Batería<br>${batBadge(pirSt.battery)}
+          </div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:0.85rem 1rem; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:0.92rem; font-weight:600;">🍳 Detector Humo y CO Cocina</div>
+            <div style="font-size:0.8rem; color:${smokeSt.is_alarm ? '#f87171' : '#34d399'}; font-weight:600; margin-top:0.2rem;">
+              ${smokeSt.is_alarm ? '🚨 ¡ALARMA HUMO/CO!' : 'Seguro (CO: ' + (smokeSt.co_ppm || 0) + ' ppm)'}
+            </div>
+          </div>
+          <div style="text-align:right; font-size:0.8rem; color:var(--modal-text-muted);">
+            Batería<br>${batBadge(smokeSt.battery)}
+          </div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:0.85rem 1rem; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:0.92rem; font-weight:600;">🪟 Sensor Vibración Ventana</div>
+            <div style="font-size:0.8rem; color:#34d399; font-weight:600; margin-top:0.2rem;">
+              Sin vibración / Normal
+            </div>
+          </div>
+          <div style="text-align:right; font-size:0.8rem; color:var(--modal-text-muted);">
+            Batería<br>${batBadge(vibSt.battery)}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:0.6rem;">
+      <div style="font-size:0.85rem; font-weight:700; color:var(--modal-text-muted); text-transform:uppercase; letter-spacing:0.04em;">Nivel de Baterías de Todos los Dispositivos</div>
+      <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:18px; padding:0.75rem 1rem; display:flex; flex-direction:column; gap:0.55rem;">
+        ${inventory.map(item => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:0.35rem 0; border-bottom:1px solid rgba(255,255,255,0.04);">
+            <div style="display:flex; align-items:center; gap:0.6rem;">
+              <span style="font-size:0.9rem;">${item.category === 'security' ? '🛡️' : (item.category === 'climate' ? '🌡️' : '🔋')}</span>
+              <span style="font-size:0.86rem; font-weight:600;">${item.name}</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:0.75rem;">
+              <span style="font-size:0.78rem; color:var(--modal-text-muted);">${item.status_text || ''}</span>
+              ${batBadge(item.battery)}
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+
+  const alarmId = data.alarm_id || "64326051e8db8480acc0";
+  async function sendAlarmMode(newMode) {
+    try {
+      await fetch("/api/devices/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_id: alarmId, code: "master_mode", value: newMode })
+      });
+      setTimeout(openAlarmDetailsModal, 800);
+    } catch (e) {
+      alert("Error al enviar orden a la alarma: " + e.message);
+    }
+  }
+
+  document.getElementById("btn-alarm-disarm")?.addEventListener("click", () => sendAlarmMode("disarmed"));
+  document.getElementById("btn-alarm-home")?.addEventListener("click", () => sendAlarmMode("home"));
+  document.getElementById("btn-alarm-arm")?.addEventListener("click", () => sendAlarmMode("arm"));
+}
+
+document.getElementById("hud-alarm-pill")?.addEventListener("click", openAlarmModal);
+document.getElementById("hud-door-pill")?.addEventListener("click", openAlarmModal);
+document.getElementById("btn-alarm-modal-close")?.addEventListener("click", () => {
+  const m = document.getElementById("alarm-details-modal");
+  if (m) { m.classList.add("hidden"); m.style.display = "none"; }
+});
+document.getElementById("alarm-details-modal")?.addEventListener("click", (e) => {
+  if (e.target.id === "alarm-details-modal") {
+    e.target.classList.add("hidden");
+    e.target.style.display = "none";
+  }
+});
+
+// --- Mac & Remote Photo Drag-and-Drop Upload ---
+function wirePhotoUploadZone() {
+  const dropZone = document.getElementById("drop-photo-zone");
+  const fileInput = document.getElementById("modal-photo-file-input");
+  const statusEl = document.getElementById("photo-upload-status");
+  if (!dropZone || !fileInput) return;
+
+  dropZone.addEventListener("click", () => fileInput.click());
+
+  dropZone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = "#38bdf8";
+    dropZone.style.background = "rgba(56,189,248,0.15)";
+  });
+
+  dropZone.addEventListener("dragleave", () => {
+    dropZone.style.borderColor = "rgba(56,189,248,0.4)";
+    dropZone.style.background = "rgba(56,189,248,0.05)";
+  });
+
+  dropZone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = "rgba(56,189,248,0.4)";
+    dropZone.style.background = "rgba(56,189,248,0.05)";
+    if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+      handlePhotoUpload(e.dataTransfer.files);
+    }
+  });
+
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files.length > 0) {
+      handlePhotoUpload(fileInput.files);
+    }
+  });
+
+  async function handlePhotoUpload(files) {
+    if (!statusEl) return;
+    statusEl.style.display = "block";
+    statusEl.style.background = "rgba(56,189,248,0.15)";
+    statusEl.style.color = "#38bdf8";
+    statusEl.textContent = `Subiendo ${files.length} foto(s) a la SD...`;
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      statusEl.textContent = `Subiendo foto ${i + 1} de ${files.length} (${file.name})...`;
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("folder", "Images");
+
+      try {
+        const res = await fetch("/api/sd/upload", {
+          method: "POST",
+          body: formData
+        });
+        if (res.ok) successCount++;
+        else failCount++;
+      } catch (err) {
+        failCount++;
+      }
+    }
+
+    if (failCount === 0) {
+      statusEl.style.background = "rgba(16,185,129,0.2)";
+      statusEl.style.color = "#34d399";
+      statusEl.textContent = `✅ ¡${successCount} foto(s) subidas con éxito a la SD!`;
+    } else {
+      statusEl.style.background = "rgba(245,158,11,0.2)";
+      statusEl.style.color = "#fbbf24";
+      statusEl.textContent = `Subidas: ${successCount} | Fallos: ${failCount}`;
+    }
+
+    setTimeout(() => {
+      if (typeof fetchPhotosList === "function") fetchPhotosList();
+      fileInput.value = "";
+    }, 1500);
+  }
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", wirePhotoUploadZone);
+} else {
+  wirePhotoUploadZone();
+}
+
+
+
+// ========================================================
+// AIR QUALITY & OUTDOOR POLLEN MODULE (29720)
+// ========================================================
+let latestAirQualityData = null;
+
+async function fetchAirQualityData() {
+  try {
+    const res = await fetch("/api/air/quality");
+    if (res.ok) {
+      latestAirQualityData = await res.json();
+      renderAirQualityGrid();
+      updateIndoorAirHud();
+    }
+  } catch (e) {
+    console.error("Error fetching air quality:", e);
+  }
+}
+
+function updateIndoorAirHud() {
+  const airGrid = document.getElementById("hud-air-rooms-grid");
+  const airBadge = document.getElementById("hud-air-badge");
+  if (!latestAirQualityData) return;
+
+  const d = latestAirQualityData;
+  const ev = d.evaluation || {};
+  const ind = d.indoor || {};
+  const pur = ind.purifier || {};
+  const sot = ind.sotano || {};
+  const coc = ind.cocina || {};
+  const out = d.outdoor || {};
+
+  if (airBadge) {
+    airBadge.textContent = ev.badge || "Excelente 🟢";
+    airBadge.style.color = ev.badge_color || "#10b981";
+    airBadge.style.borderColor = `${ev.badge_color || "#10b981"}55`;
+    airBadge.style.background = `${ev.badge_color || "#10b981"}22`;
+  }
+
+  if (airGrid) {
+    const sotCo2 = (sot.co2 !== undefined && sot.co2 > 10) ? `${sot.co2} ppm` : `Nivel ${sot.co2 ?? 1} (Óptimo)`;
+    airGrid.innerHTML = `
+      <div class="hud-room-item" title="Salón: ${pur.aqi ?? '--'} µg/m³ PM2.5 (Calidad ${pur.quality_label || 'Buena'})">
+        <span class="hud-room-name">🌀 Salón</span>
+        <span class="hud-room-val">${pur.aqi ?? '--'} <span style="font-size:0.68rem; color:#38bdf8;">PM2.5</span></span>
+      </div>
+      <div class="hud-room-item" title="Sótano: CO₂ ${sotCo2}">
+        <span class="hud-room-name">🌬️ Sótano</span>
+        <span class="hud-room-val"><span style="font-size:0.75rem; color:#a855f7;">${sotCo2}</span></span>
+      </div>
+      <div class="hud-room-item" title="Cocina: Monóxido ${coc.co_ppm ?? 0} ppm, Humo Seguro">
+        <span class="hud-room-name">🍳 Cocina</span>
+        <span class="hud-room-val">${coc.co_ppm ?? 0} ppm <span style="font-size:0.68rem; color:#10b981;">Humo OK</span></span>
+      </div>
+      <div class="hud-room-item" title="Exterior 29720 (Rincón de la Victoria): Polen ${out.pollen_total ?? 0.5} gr/m³ (${out.pollen_level || 'Bajo'}), EAQI ${out.european_aqi ?? 25}">
+        <span class="hud-room-name">🌿 Ext. 29720</span>
+        <span class="hud-room-val">${out.pollen_total ?? 0.5} gr/m³ <span style="font-size:0.68rem; color:#10b981;">Polen Bajo</span></span>
+      </div>
+    `;
+  }
+}
+
+function renderAirQualityGrid() {
+  const container = document.getElementById("air-quality-grid");
+  if (!container) return;
+  if (!latestAirQualityData) {
+    container.innerHTML = `<div class="liquid-card"><p style="color:var(--modal-text-muted); margin:0; font-size:0.8rem;">Cargando análisis de aire...</p></div>`;
+    return;
+  }
+
+  const d = latestAirQualityData;
+  const ev = d.evaluation || {};
+  const ind = d.indoor || {};
+  const pur = ind.purifier || {};
+  const sot = ind.sotano || {};
+  const coc = ind.cocina || {};
+  const out = d.outdoor || {};
+
+  const sotCo2 = (sot.co2 !== undefined && sot.co2 > 10) ? `${sot.co2} ppm` : `Nivel ${sot.co2 ?? 2}`;
+
+  const sotCo2Short = (sot.co2 !== undefined && sot.co2 > 10) ? `${sot.co2}` : `${sot.co2 ?? 2}`;
+  container.innerHTML = `
+    <div class="liquid-card air-quality-card" id="card-air-quality-main" style="cursor:pointer; padding:0.68rem 0.78rem; gap:0.38rem;" title="Pulsa para ver análisis de calidad del aire, polen y control de purificador">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:0.4rem;">
+        <span style="font-size:0.72rem; font-weight:700; padding:0.14rem 0.5rem; border-radius:999px; background:rgba(16,185,129,0.18); color:${ev.badge_color || '#10b981'}; border:1px solid ${ev.badge_color || '#10b981'}44;">${ev.badge || 'Excelente 🟢'}</span>
+        <span style="font-size:0.72rem; font-weight:700; color:var(--neon-cyan); white-space:nowrap;">Detalle & Polen ›</span>
+      </div>
+      <div style="font-size:0.82rem; font-weight:700; color:var(--modal-text); line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${ev.headline || 'Aire Saludable & Pureza Óptima'}</div>
+
+      <!-- 3 Habitaciones compactas -->
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.3rem;">
+        <div style="background:rgba(255,255,255,0.04); padding:0.3rem 0.25rem; border-radius:10px; border:1px solid var(--modal-subcard-border); text-align:center;">
+          <div style="font-size:0.64rem; color:var(--modal-text-muted);">🌀 Salón</div>
+          <div style="font-size:0.86rem; font-weight:800; color:#38bdf8; line-height:1.15;">${pur.aqi ?? '--'}</div>
+          <div style="font-size:0.61rem; color:${pur.quality_color || '#10b981'}; font-weight:700;">PM2.5 · ${pur.quality_label || 'Buena'}</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.04); padding:0.3rem 0.25rem; border-radius:10px; border:1px solid var(--modal-subcard-border); text-align:center;">
+          <div style="font-size:0.64rem; color:var(--modal-text-muted);">🌬️ Sótano</div>
+          <div style="font-size:0.86rem; font-weight:800; color:#a855f7; line-height:1.15;">${sotCo2Short}</div>
+          <div style="font-size:0.61rem; color:${sot.quality_color || '#10b981'}; font-weight:700;">ppm CO₂</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.04); padding:0.3rem 0.25rem; border-radius:10px; border:1px solid var(--modal-subcard-border); text-align:center;">
+          <div style="font-size:0.64rem; color:var(--modal-text-muted);">🍳 Cocina</div>
+          <div style="font-size:0.86rem; font-weight:800; color:#10b981; line-height:1.15;">${coc.co_ppm ?? 0}</div>
+          <div style="font-size:0.61rem; color:#10b981; font-weight:700;">ppm CO · OK</div>
+        </div>
+      </div>
+
+      <!-- Exterior 29720 Polen compacto -->
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:0.35rem; background:rgba(56,189,248,0.08); padding:0.3rem 0.5rem; border-radius:10px; border:1px solid rgba(56,189,248,0.22); font-size:0.68rem; line-height:1.2;">
+        <span style="color:var(--modal-text);">🌤️ <b>29720:</b> EAQI ${out.european_aqi ?? 25} · ${out.pm2_5 ?? 3.6} PM</span>
+        <span style="color:${out.pollen_color || '#10b981'}; font-weight:700; white-space:nowrap;">Polen ${out.pollen_total ?? 0.5} (${out.pollen_level || 'Bajo'})</span>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("card-air-quality-main")?.addEventListener("click", openAirQualityModal);
+}
+
+function openAirQualityModal() {
+  const modal = document.getElementById("air-quality-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  modal.style.display = "flex";
+  renderAirQualityModalContent();
+}
+
+function closeAirQualityModal() {
+  const modal = document.getElementById("air-quality-modal");
+  if (modal) {
+    modal.classList.add("hidden");
+    modal.style.display = "none";
+  }
+}
+
+function renderAirQualityModalContent() {
+  const body = document.getElementById("air-modal-body");
+  const badge = document.getElementById("air-modal-badge");
+  if (!body || !latestAirQualityData) return;
+
+  const d = latestAirQualityData;
+  const ev = d.evaluation || {};
+  const ind = d.indoor || {};
+  const pur = ind.purifier || {};
+  const sot = ind.sotano || {};
+  const coc = ind.cocina || {};
+  const out = d.outdoor || {};
+  const pb = out.pollen_breakdown || {};
+
+  if (badge) {
+    badge.textContent = ev.badge || "Excelente 🟢";
+    badge.style.color = ev.badge_color || "#10b981";
+    badge.style.borderColor = `${ev.badge_color || "#10b981"}55`;
+    badge.style.background = `${ev.badge_color || "#10b981"}22`;
+  }
+
+  const sotCo2 = (sot.co2 !== undefined && sot.co2 > 10) ? `${sot.co2} ppm` : `Nivel ${sot.co2 ?? 2}`;
+  const isPurOn = Boolean(pur.is_on);
+  const purMode = (pur.mode || "auto").toLowerCase();
+
+  body.innerHTML = `
+    <!-- 1. Diagnóstico Inteligente del Aire -->
+    <div class="domos-modal-subcard" style="padding:1rem 1.25rem; border-radius:18px; background:linear-gradient(135deg, rgba(16,185,129,0.12), rgba(56,189,248,0.06)); border:1px solid rgba(16,185,129,0.35);">
+      <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.35rem;">
+        <span style="font-size:1.3rem;">🍃</span>
+        <h4 style="margin:0; font-size:1.05rem; color:var(--modal-text);">${ev.headline || "Calidad del Aire Interior & Exterior"}</h4>
+      </div>
+      <p style="margin:0; font-size:0.86rem; color:var(--modal-text); line-height:1.45;">${ev.summary || ""}</p>
+    </div>
+
+    <!-- 2. Detalle Interior por Estancias -->
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:0.75rem;">
+      <!-- Salón: Purificador Xiaomi -->
+      <div class="domos-modal-subcard" style="padding:0.95rem 1.15rem; border-radius:18px; display:flex; flex-direction:column; gap:0.55rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; align-items:center; gap:0.4rem; font-weight:700; font-size:0.92rem;">
+            <span>🌀</span><span>Salón (Purificador)</span>
+          </div>
+          <button type="button" class="liquid-action-pill btn-modal-pur-power" data-id="${pur.id}" data-on="${isPurOn ? "1" : "0"}" style="cursor:pointer; padding:0.25rem 0.65rem; font-size:0.76rem; background:${isPurOn ? "rgba(16,185,129,0.25)" : "rgba(255,255,255,0.06)"}; border-color:${isPurOn ? "#10b981" : "var(--modal-subcard-border)"};">
+            ${isPurOn ? "Encendido" : "Apagado"}
+          </button>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+          <div>
+            <span style="font-size:1.7rem; font-weight:800; color:#38bdf8;">${pur.aqi ?? '--'}</span>
+            <span style="font-size:0.78rem; color:var(--modal-text-muted); font-weight:600;">µg/m³ PM2.5</span>
+          </div>
+          <span style="font-size:0.8rem; font-weight:700; color:${pur.quality_color || '#10b981'};">${pur.quality_label || 'Buena'}</span>
+        </div>
+        <div style="font-size:0.78rem; color:var(--modal-text-muted); display:flex; justify-content:space-between;">
+          <span>🌡️ ${pur.temperature ?? '--'}°C · 💧 ${pur.humidity ?? '--'}%</span>
+          <span>Filtro: <b>${pur.filter_life ?? '--'}%</b></span>
+        </div>
+        <!-- Selectores de Modo del Purificador -->
+        <div style="display:flex; gap:0.35rem; margin-top:0.2rem;">
+          <button type="button" class="liquid-action-pill btn-modal-pur-mode" data-id="${pur.id}" data-mode="auto" style="flex:1; cursor:pointer; padding:0.28rem; font-size:0.75rem; ${isPurOn && purMode === "auto" ? "background:rgba(56,189,248,0.25); border-color:#38bdf8; font-weight:700;" : ""}">✨ Auto</button>
+          <button type="button" class="liquid-action-pill btn-modal-pur-mode" data-id="${pur.id}" data-mode="silent" style="flex:1; cursor:pointer; padding:0.28rem; font-size:0.75rem; ${isPurOn && purMode === "silent" ? "background:rgba(56,189,248,0.25); border-color:#38bdf8; font-weight:700;" : ""}">🌙 Noche</button>
+          <button type="button" class="liquid-action-pill btn-modal-pur-mode" data-id="${pur.id}" data-mode="favorite" style="flex:1; cursor:pointer; padding:0.28rem; font-size:0.75rem; ${isPurOn && purMode === "favorite" ? "background:rgba(56,189,248,0.25); border-color:#38bdf8; font-weight:700;" : ""}">⚡ Potente</button>
+        </div>
+        <!-- Automatización Purificador por PM2.5 -->
+        <div style="margin-top:0.35rem; padding:0.45rem 0.6rem; border-radius:12px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); display:flex; flex-direction:column; gap:0.22rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:0.4rem;">
+            <span style="font-size:0.74rem; font-weight:700; color:var(--modal-text);">🤖 Auto-Purificación</span>
+            <button type="button" id="btn-toggle-air-auto" onclick="toggleAirPurifierAuto()" class="liquid-action-pill" style="cursor:pointer; padding:0.14rem 0.55rem; font-size:0.7rem; font-weight:700; background:${(d.air_auto?.config?.enabled !== false) ? 'rgba(16,185,129,0.24)' : 'rgba(148,163,184,0.20)'}; border-color:${(d.air_auto?.config?.enabled !== false) ? '#10b981' : 'var(--modal-subcard-border)'}; color:${(d.air_auto?.config?.enabled !== false) ? '#047857' : 'var(--modal-text-muted)'};">
+              ${(d.air_auto?.config?.enabled !== false) ? 'Activa' : 'Pausada'}
+            </button>
+          </div>
+          <div style="font-size:0.68rem; color:var(--modal-text-muted); line-height:1.25;">
+            ON ≥ ${d.air_auto?.config?.on_pm25 ?? 35} PM2.5 · OFF ≤ ${d.air_auto?.config?.off_pm25 ?? 15} PM2.5 · 🌙 Noche 23–08h
+          </div>
+          <div style="font-size:0.69rem; color:var(--modal-text); font-weight:600;">${d.air_auto?.status_text || 'Supervisando PM2.5'}</div>
+        </div>
+      </div>
+
+      <!-- Sótano: AirBox -->
+      <div class="domos-modal-subcard" style="padding:0.95rem 1.15rem; border-radius:18px; display:flex; flex-direction:column; gap:0.55rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; align-items:center; gap:0.4rem; font-weight:700; font-size:0.92rem;">
+            <span>🌬️</span><span>Sótano (AirBox)</span>
+          </div>
+          <span style="font-size:0.72rem; padding:0.2rem 0.5rem; border-radius:999px; background:rgba(168,85,247,0.18); color:#a855f7; border:1px solid rgba(168,85,247,0.35);">CO₂ / VOC</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+          <div>
+            <span style="font-size:1.7rem; font-weight:800; color:#a855f7;">${sotCo2}</span>
+          </div>
+          <span style="font-size:0.8rem; font-weight:700; color:${sot.quality_color || '#10b981'};">Aire Saludable</span>
+        </div>
+        <div style="font-size:0.78rem; color:var(--modal-text-muted); display:flex; justify-content:space-between;">
+          <span>🌡️ ${sot.temperature ?? '--'}°C · 💧 ${sot.humidity ?? '--'}%</span>
+          <span>Compuestos VOC: <b style="color:#10b981;">Limpio</b></span>
+        </div>
+        <div style="margin-top:auto; font-size:0.73rem; color:var(--modal-text-muted); line-height:1.25;">
+          Monitorización continua por red local para prevención de concentración de CO₂.
+        </div>
+      </div>
+
+      <!-- Cocina: Detector Humo y CO -->
+      <div class="domos-modal-subcard" style="padding:0.95rem 1.15rem; border-radius:18px; display:flex; flex-direction:column; gap:0.55rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; align-items:center; gap:0.4rem; font-weight:700; font-size:0.92rem;">
+            <span>🍳</span><span>Cocina (Humo & CO)</span>
+          </div>
+          <span style="font-size:0.72rem; padding:0.2rem 0.5rem; border-radius:999px; background:rgba(16,185,129,0.18); color:#10b981; border:1px solid rgba(16,185,129,0.35);">Seguridad</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+          <div>
+            <span style="font-size:1.7rem; font-weight:800; color:#10b981;">${coc.co_ppm ?? 0}</span>
+            <span style="font-size:0.78rem; color:var(--modal-text-muted); font-weight:600;">ppm CO</span>
+          </div>
+          <span style="font-size:0.8rem; font-weight:700; color:#10b981;">Despejado 🛡️</span>
+        </div>
+        <div style="font-size:0.78rem; color:var(--modal-text-muted); display:flex; justify-content:space-between;">
+          <span>Detector de Humo: <b style="color:#10b981;">Normal</b></span>
+          <span>Batería: <b>OK</b></span>
+        </div>
+        <div style="margin-top:auto; font-size:0.73rem; color:var(--modal-text-muted); line-height:1.25;">
+          Sin riesgos de combustión incompleta ni humos detectados en zona de cocina.
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Entorno Exterior & Niveles de Polen (CP 29720 - Rincón de la Victoria) -->
+    <div class="domos-modal-subcard" style="padding:1rem 1.25rem; border-radius:18px; display:flex; flex-direction:column; gap:0.75rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+        <div>
+          <div style="font-weight:700; font-size:0.95rem; color:var(--modal-text); display:flex; align-items:center; gap:0.4rem;">
+            <span>🌿</span><span>Polen y Calidad Exterior · Código Postal 29720</span>
+          </div>
+          <div style="font-size:0.75rem; color:var(--modal-text-muted);">Estación meteorológica y ambiental de Rincón de la Victoria / Málaga</div>
+        </div>
+        <span style="font-size:0.8rem; font-weight:700; padding:0.25rem 0.65rem; border-radius:999px; background:rgba(56,189,248,0.18); color:#38bdf8; border:1px solid rgba(56,189,248,0.35);">EAQI ${out.european_aqi ?? 25} (Excelente)</span>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:0.5rem;">
+        <div style="background:rgba(255,255,255,0.03); padding:0.6rem 0.75rem; border-radius:12px; border:1px solid var(--modal-subcard-border); text-align:center;">
+          <div style="font-size:0.7rem; color:var(--modal-text-muted);">🌾 Gramíneas</div>
+          <div style="font-size:1.1rem; font-weight:800; color:#10b981;">${pb.grass ?? 0} <span style="font-size:0.65rem;">gr/m³</span></div>
+          <div style="font-size:0.65rem; color:var(--modal-text-muted);">Nulo</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03); padding:0.6rem 0.75rem; border-radius:12px; border:1px solid var(--modal-subcard-border); text-align:center;">
+          <div style="font-size:0.7rem; color:var(--modal-text-muted);">🫒 Olivo</div>
+          <div style="font-size:1.1rem; font-weight:800; color:#10b981;">${pb.olive ?? 0} <span style="font-size:0.65rem;">gr/m³</span></div>
+          <div style="font-size:0.65rem; color:var(--modal-text-muted);">Nulo</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03); padding:0.6rem 0.75rem; border-radius:12px; border:1px solid var(--modal-subcard-border); text-align:center;">
+          <div style="font-size:0.7rem; color:var(--modal-text-muted);">🌱 Artemisia</div>
+          <div style="font-size:1.1rem; font-weight:800; color:#38bdf8;">${pb.mugwort ?? 0.5} <span style="font-size:0.65rem;">gr/m³</span></div>
+          <div style="font-size:0.65rem; color:var(--modal-text-muted);">Muy bajo</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03); padding:0.6rem 0.75rem; border-radius:12px; border:1px solid var(--modal-subcard-border); text-align:center;">
+          <div style="font-size:0.7rem; color:var(--modal-text-muted);">🌲 Abedul / Aliso</div>
+          <div style="font-size:1.1rem; font-weight:800; color:#10b981;">${(pb.birch || 0) + (pb.alder || 0)} <span style="font-size:0.65rem;">gr/m³</span></div>
+          <div style="font-size:0.65rem; color:var(--modal-text-muted);">Nulo</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03); padding:0.6rem 0.75rem; border-radius:12px; border:1px solid var(--modal-subcard-border); text-align:center;">
+          <div style="font-size:0.7rem; color:var(--modal-text-muted);">💨 PM2.5 Exterior</div>
+          <div style="font-size:1.1rem; font-weight:800; color:#38bdf8;">${out.pm2_5 ?? 3.6} <span style="font-size:0.65rem;">µg/m³</span></div>
+          <div style="font-size:0.65rem; color:var(--modal-text-muted);">Limpio</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Acceso directo a Gráficas Históricas -->
+    <div style="display:flex; justify-content:flex-end; gap:0.6rem;">
+      <button type="button" id="btn-air-to-co2-chart" class="liquid-action-pill" style="cursor:pointer; padding:0.5rem 1rem; font-weight:700; color:#a855f7; border-color:rgba(168,85,247,0.4);">
+        📈 Ver Evolución Histórica de CO₂
+      </button>
+      <button type="button" id="btn-air-to-pm-chart" class="liquid-action-pill" style="cursor:pointer; padding:0.5rem 1rem; font-weight:700; color:#38bdf8; border-color:rgba(56,189,248,0.4);">
+        📈 Ver Evolución de Partículas PM2.5
+      </button>
+    </div>
+  `;
+
+  // Attach controls
+  body.querySelectorAll(".btn-modal-pur-power").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-id");
+      const turnOn = btn.getAttribute("data-on") !== "1";
+      await sendXiaomiCommand(id, "power", turnOn);
+      await fetchAirQualityData();
+      renderAirQualityModalContent();
+    });
+  });
+
+  body.querySelectorAll(".btn-modal-pur-mode").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-id");
+      const mode = btn.getAttribute("data-mode");
+      await sendXiaomiCommand(id, "mode", mode);
+      await fetchAirQualityData();
+      renderAirQualityModalContent();
+    });
+  });
+
+  document.getElementById("btn-air-to-co2-chart")?.addEventListener("click", () => {
+    closeAirQualityModal();
+    openClimateHistoryModal("co2");
+  });
+
+  document.getElementById("btn-air-to-pm-chart")?.addEventListener("click", () => {
+    closeAirQualityModal();
+    openClimateHistoryModal("pm25");
+  });
+}
+
+// Event Listeners for Air Quality Modal
+document.getElementById("btn-open-air-modal")?.addEventListener("click", openAirQualityModal);
+document.getElementById("btn-air-modal-close")?.addEventListener("click", closeAirQualityModal);
+document.getElementById("hud-air-pill")?.addEventListener("click", openAirQualityModal);
+document.getElementById("air-quality-modal")?.addEventListener("click", (e) => {
+  if (e.target.id === "air-quality-modal") closeAirQualityModal();
+});
+
+// Periodic fetch for Air Quality
+setInterval(fetchAirQualityData, 30000);
+setTimeout(fetchAirQualityData, 1000);
+
+
+document.getElementById("hud-indoor-climate-card")?.addEventListener("click", () => openClimateHistoryModal());
+document.getElementById("hud-air-quality-card")?.addEventListener("click", openAirQualityModal);
+
+
+window.closeAirQualityModal = function() {
+  const modal = document.getElementById("air-quality-modal");
+  if (modal) {
+    modal.classList.add("hidden");
+    modal.style.display = "none";
+  }
+};
+
+window.openAirQualityModal = openAirQualityModal;
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    closeAirQualityModal();
+  }
+});
+
+
+
+// ========================================================
+// SMART PLUG POWER CONSUMPTION CHART (DAILY / MONTHLY / YEARLY)
+// ========================================================
+let plugChartPeriod = "daily";
+let plugChartHidden = new Set();
+let plugChartDataCache = null;
+
+function initPlugPowerChartControls() {
+  document.querySelectorAll(".plug-period-btn").forEach(btn => {
+    const per = btn.getAttribute("data-period");
+    btn.classList.toggle("active", per === plugChartPeriod);
+    btn.addEventListener("click", () => {
+      plugChartPeriod = per;
+      document.querySelectorAll(".plug-period-btn").forEach(b => {
+        b.classList.toggle("active", b.getAttribute("data-period") === plugChartPeriod);
+      });
+      loadAndRenderPlugPowerChart(plugChartPeriod);
+    });
+  });
+  loadAndRenderPlugPowerChart(plugChartPeriod);
+}
+
+async function loadAndRenderPlugPowerChart(period = "daily") {
+  const wrap = document.getElementById("plug-chart-svg-wrap");
+  if (!wrap) return;
+  try {
+    const res = await fetch(`/api/power/history?period=${encodeURIComponent(period)}`);
+    if (!res.ok) return;
+    plugChartDataCache = await res.json();
+    renderPlugPowerChartSvg(plugChartDataCache);
+  } catch (e) {
+    console.error("Error loading power history:", e);
+  }
+}
+
+function _buildSmoothPath(coords) {
+  if (!coords.length) return "";
+  if (coords.length === 1) return `M ${coords[0].x.toFixed(1)} ${coords[0].y.toFixed(1)}`;
+  let d = `M ${coords[0].x.toFixed(1)} ${coords[0].y.toFixed(1)}`;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const p0 = coords[i === 0 ? i : i - 1];
+    const p1 = coords[i];
+    const p2 = coords[i + 1];
+    const p3 = coords[i + 2 < coords.length ? i + 2 : i + 1];
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  }
+  return d;
+}
+
+function renderPlugPowerChartSvg(data) {
+  const wrap = document.getElementById("plug-chart-svg-wrap");
+  const legendEl = document.getElementById("plug-chart-legend");
+  const titleEl = document.getElementById("plug-chart-title");
+  const subEl = document.getElementById("plug-chart-subtitle");
+  if (!wrap || !data) return;
+
+  if (titleEl) titleEl.textContent = `📊 ${data.title || "Consumo por Enchufe (kWh)"}`;
+  if (subEl) subEl.textContent = `Total periodo: ${data.grand_total_kwh ?? 0} kWh · Pulsa un dispositivo para ocultar/mostrar su curva`;
+
+  const series = data.series || [];
+  const points = data.points || [];
+
+  // Interactive color-coded legend
+  if (legendEl) {
+    legendEl.innerHTML = series.map(s => {
+      const hidden = plugChartHidden.has(s.key);
+      return `
+        <button type="button" class="plug-legend-chip ${hidden ? "is-hidden" : ""}" data-key="${s.key}" style="display:inline-flex; align-items:center; gap:0.35rem; padding:0.24rem 0.6rem; border-radius:999px; font-size:0.73rem; font-weight:700; cursor:pointer; border:1px solid ${hidden ? "rgba(148,163,184,0.3)" : s.color + "66"}; background:${hidden ? "transparent" : s.color + "1c"}; color:var(--modal-text); opacity:${hidden ? "0.45" : "1"}; transition:all 0.15s;">
+          <span style="width:9px; height:9px; border-radius:50%; background:${s.color}; display:inline-block; flex-shrink:0;"></span>
+          <span>${s.name}</span>
+          <span style="color:${s.color}; font-weight:800;">${s.total_kwh} kWh</span>
+        </button>
+      `;
+    }).join("");
+
+    legendEl.querySelectorAll(".plug-legend-chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        const k = chip.getAttribute("data-key");
+        if (plugChartHidden.has(k)) plugChartHidden.delete(k);
+        else plugChartHidden.add(k);
+        renderPlugPowerChartSvg(plugChartDataCache);
+      });
+    });
+  }
+
+  const activeSeries = series.filter(s => !plugChartHidden.has(s.key));
+  const W = 740, H = 220;
+  const padL = 48, padR = 16, padT = 16, padB = 30;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+
+  let maxVal = 0.1;
+  points.forEach(pt => {
+    activeSeries.forEach(s => {
+      const v = Number(pt.values?.[s.key] || 0);
+      if (v > maxVal) maxVal = v;
+    });
+  });
+  // Nice rounded ceiling
+  const yMax = maxVal <= 0.5 ? Math.ceil(maxVal * 10) / 10 : (maxVal <= 5 ? Math.ceil(maxVal * 2) / 2 : Math.ceil(maxVal / 5) * 5);
+  const n = Math.max(1, points.length);
+  const xAt = (i) => padL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const yAt = (v) => padT + plotH - (Math.max(0, v) / yMax) * plotH;
+
+  // Gridlines + Y labels
+  const gridSteps = 4;
+  let gridHtml = "";
+  for (let g = 0; g <= gridSteps; g++) {
+    const val = (yMax / gridSteps) * g;
+    const y = yAt(val);
+    const lbl = yMax < 2 ? val.toFixed(2) : (yMax < 10 ? val.toFixed(1) : Math.round(val));
+    gridHtml += `
+      <line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" stroke="rgba(148,163,184,0.22)" stroke-dasharray="${g === 0 ? "" : "3,4"}" />
+      <text x="${padL - 7}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" font-size="10.5" fill="var(--modal-text-muted)">${lbl}</text>
+    `;
+  }
+
+  // X labels
+  const stepX = n > 16 ? 3 : (n > 10 ? 2 : 1);
+  let xLabelsHtml = "";
+  for (let i = 0; i < n; i++) {
+    if (i % stepX === 0 || i === n - 1) {
+      const lbl = points[i].short || points[i].label;
+      xLabelsHtml += `<text x="${xAt(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="10.5" fill="var(--modal-text-muted)">${lbl}</text>`;
+    }
+  }
+
+  // Series defs + smooth curves + area gradients
+  let defsHtml = "";
+  let pathsHtml = "";
+  activeSeries.forEach((s, idx) => {
+    const gradId = `plugGrad_${s.key}_${idx}`;
+    defsHtml += `
+      <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${s.color}" stop-opacity="0.24" />
+        <stop offset="100%" stop-color="${s.color}" stop-opacity="0.01" />
+      </linearGradient>
+    `;
+    const coords = points.map((pt, i) => ({
+      x: xAt(i),
+      y: Math.min(padT + plotH, Math.max(padT, yAt(Number(pt.values?.[s.key] || 0))))
+    }));
+    const lineD = _buildSmoothPath(coords);
+    const areaD = `${lineD} L ${coords[coords.length - 1].x.toFixed(1)} ${(padT + plotH).toFixed(1)} L ${coords[0].x.toFixed(1)} ${(padT + plotH).toFixed(1)} Z`;
+    pathsHtml += `
+      <path d="${areaD}" fill="url(#${gradId})" />
+      <path d="${lineD}" fill="none" stroke="${s.color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    `;
+  });
+
+  wrap.innerHTML = `
+    <svg id="plug-power-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%; height:100%; display:block; overflow:visible;">
+      <defs>${defsHtml}</defs>
+      ${gridHtml}
+      ${xLabelsHtml}
+      ${pathsHtml}
+      <line id="plug-hover-line" x1="0" y1="${padT}" x2="0" y2="${padT + plotH}" stroke="rgba(148,163,184,0.65)" stroke-width="1.2" stroke-dasharray="3,3" style="display:none;" />
+      <g id="plug-hover-dots"></g>
+      <rect id="plug-hover-zone" x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" fill="transparent" style="cursor:crosshair;" />
+    </svg>
+    <div id="plug-hover-tooltip" style="display:none; position:absolute; top:8px; left:60px; pointer-events:none; background:rgba(15,23,42,0.92); color:#f8fafc; border:1px solid rgba(255,255,255,0.18); border-radius:12px; padding:0.5rem 0.7rem; font-size:0.74rem; box-shadow:0 10px 28px rgba(0,0,0,0.35); z-index:20; min-width:165px;"></div>
+  `;
+
+  const zone = document.getElementById("plug-hover-zone");
+  const vLine = document.getElementById("plug-hover-line");
+  const dotsG = document.getElementById("plug-hover-dots");
+  const tip = document.getElementById("plug-hover-tooltip");
+
+  const handleMove = (clientX) => {
+    const svg = document.getElementById("plug-power-svg");
+    if (!svg || !points.length) return;
+    const rect = svg.getBoundingClientRect();
+    const relX = ((clientX - rect.left) / rect.width) * W;
+    const ratio = Math.max(0, Math.min(1, (relX - padL) / plotW));
+    const idx = Math.round(ratio * (n - 1));
+    const pt = points[idx];
+    if (!pt) return;
+
+    const cx = xAt(idx);
+    vLine.setAttribute("x1", cx.toFixed(1));
+    vLine.setAttribute("x2", cx.toFixed(1));
+    vLine.style.display = "block";
+
+    let dotsSvg = "";
+    let rowsHtml = "";
+    let tot = 0;
+    activeSeries.forEach(s => {
+      const v = Number(pt.values?.[s.key] || 0);
+      tot += v;
+      const cy = Math.min(padT + plotH, Math.max(padT, yAt(v)));
+      dotsSvg += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4.2" fill="${s.color}" stroke="#ffffff" stroke-width="1.5" />`;
+      rowsHtml += `
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; margin-top:2px;">
+          <span style="display:inline-flex; align-items:center; gap:0.3rem;"><span style="width:7px; height:7px; border-radius:50%; background:${s.color};"></span>${s.name}</span>
+          <strong>${v.toFixed(v < 1 ? 3 : 2)} kWh</strong>
+        </div>
+      `;
+    });
+    dotsG.innerHTML = dotsSvg;
+
+    tip.innerHTML = `
+      <div style="font-weight:700; margin-bottom:4px; border-bottom:1px solid rgba(255,255,255,0.14); padding-bottom:3px; display:flex; justify-content:space-between;">
+        <span>${pt.label}</span>
+        <span style="color:#7dd3fc;">${tot.toFixed(2)} kWh</span>
+      </div>
+      ${rowsHtml}
+    `;
+    tip.style.display = "block";
+    const pctLeft = (cx / W) * 100;
+    if (pctLeft > 58) {
+      tip.style.left = "auto";
+      tip.style.right = `${Math.max(4, 100 - pctLeft + 3).toFixed(1)}%`;
+    } else {
+      tip.style.right = "auto";
+      tip.style.left = `${Math.min(72, pctLeft + 3).toFixed(1)}%`;
+    }
+  };
+
+  const hideTip = () => {
+    if (vLine) vLine.style.display = "none";
+    if (dotsG) dotsG.innerHTML = "";
+    if (tip) tip.style.display = "none";
+  };
+
+  zone?.addEventListener("mousemove", (e) => handleMove(e.clientX));
+  zone?.addEventListener("touchstart", (e) => { if (e.touches[0]) handleMove(e.touches[0].clientX); }, { passive: true });
+  zone?.addEventListener("touchmove", (e) => { if (e.touches[0]) handleMove(e.touches[0].clientX); }, { passive: true });
+  zone?.addEventListener("mouseleave", hideTip);
+}
+
+
+
+// ========================================================
+// ALARM & SECURITY ACCESSORIES DETAIL MODAL
+// ========================================================
+async function openAlarmModal() {
+  const modal = document.getElementById("security-alarm-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  modal.style.display = "flex";
+  const body = document.getElementById("security-alarm-modal-body");
+  if (body && !body.dataset.loaded) {
+    body.innerHTML = `<p style="color:var(--modal-text-muted); margin:0;">Cargando estado de la centralita, sensores y log de eventos...</p>`;
+  }
+  try {
+    const res = await fetch("/api/security/alarm/details");
+    if (res.ok) {
+      const data = await res.json();
+      renderAlarmModalContent(data);
+    }
+  } catch (e) {
+    console.error("Error loading alarm details:", e);
+  }
+}
+
+function closeAlarmModal() {
+  const modal = document.getElementById("security-alarm-modal");
+  if (modal) {
+    modal.classList.add("hidden");
+    modal.style.display = "none";
+  }
+}
+window.openAlarmModal = openAlarmModal;
+window.closeAlarmModal = closeAlarmModal;
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeAlarmModal();
+});
+
+function renderAlarmModalContent(data) {
+  const body = document.getElementById("security-alarm-modal-body");
+  const badge = document.getElementById("security-alarm-modal-badge");
+  if (!body || !data) return;
+  body.dataset.loaded = "1";
+
+  const al = data.alarm || {};
+  const zones = data.zones || [];
+  const accessories = data.accessories || [];
+  const events = data.events || [];
+  const mode = al.master_mode || "disarmed";
+
+  if (badge) {
+    badge.textContent = al.mode_label || "Desarmada";
+    badge.style.color = al.mode_color || "#10b981";
+    badge.style.borderColor = `${al.mode_color || "#10b981"}55`;
+    badge.style.background = `${al.mode_color || "#10b981"}20`;
+  }
+
+  const batColor = (st) => st === "critical" ? "#ef4444" : (st === "warning" ? "#f59e0b" : "#10b981");
+
+  // 1. Visual 2x2 Zone Distribution Map
+  const zonesHtml = zones.map(z => {
+    const borderCol = z.has_alert ? "rgba(239,68,68,0.45)" : "rgba(16,185,129,0.32)";
+    const itemsHtml = (z.accessories || []).map(a => {
+      const dotCol = a.alert ? "#ef4444" : (a.battery?.status === "critical" ? "#ef4444" : "#10b981");
+      const bCol = batColor(a.battery?.status);
+      return `
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:0.4rem; padding:0.38rem 0.55rem; border-radius:10px; background:rgba(148,163,184,0.1); border:1px solid rgba(148,163,184,0.2);">
+          <div style="display:flex; align-items:center; gap:0.35rem; min-width:0;">
+            <span style="width:8px; height:8px; border-radius:50%; background:${dotCol}; flex-shrink:0;"></span>
+            <span style="font-size:0.78rem; font-weight:700; color:var(--modal-text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${a.icon} ${a.name}</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:0.4rem; flex-shrink:0;">
+            <span style="font-size:0.72rem; font-weight:700; color:${a.alert ? '#ef4444' : 'var(--modal-text-muted)'};">${a.state_label}</span>
+            <span style="font-size:0.7rem; font-weight:800; color:${bCol};">🔋 ${a.battery?.label ?? '--'}</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+    return `
+      <div class="domos-modal-subcard" style="padding:0.8rem 0.95rem; border-radius:16px; border:1px solid ${borderCol}; display:flex; flex-direction:column; gap:0.45rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-size:0.84rem; font-weight:800; color:var(--modal-text);">${z.icon} ${z.title}</div>
+          <span style="font-size:0.68rem; font-weight:700; color:${z.has_alert ? '#ef4444' : '#10b981'};">${z.has_alert ? '⚠️ Revisar' : '● OK'}</span>
+        </div>
+        <div style="font-size:0.7rem; color:var(--modal-text-muted); margin-top:-4px;">${z.desc}</div>
+        <div style="display:flex; flex-direction:column; gap:0.35rem;">${itemsHtml}</div>
+      </div>
+    `;
+  }).join("");
+
+  // 2. Accessories Battery & Health Bars
+  const accRowsHtml = accessories.map(a => {
+    const pct = a.battery?.pct ?? 80;
+    const bCol = batColor(a.battery?.status);
+    return `
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:0.75rem; padding:0.45rem 0.65rem; border-radius:12px; background:rgba(148,163,184,0.08); border:1px solid rgba(148,163,184,0.18);">
+        <div style="display:flex; align-items:center; gap:0.5rem; min-width:0; flex:1;">
+          <span style="font-size:1.1rem;">${a.icon}</span>
+          <div style="min-width:0;">
+            <div style="font-size:0.82rem; font-weight:700; color:var(--modal-text);">${a.name} <span style="font-weight:500; font-size:0.72rem; color:var(--modal-text-muted);">· ${a.zone}</span></div>
+            <div style="font-size:0.72rem; color:${a.alert ? '#ef4444' : 'var(--modal-text-muted)'}; font-weight:${a.alert ? '700' : '500'};">${a.state_label} · ${a.protocol}</div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.5rem; width:130px; flex-shrink:0;">
+          <div style="flex:1; height:7px; border-radius:999px; background:rgba(148,163,184,0.25); overflow:hidden;">
+            <div style="width:${Math.max(6, Math.min(100, pct))}%; height:100%; background:${bCol}; border-radius:999px;"></div>
+          </div>
+          <span style="font-size:0.75rem; font-weight:800; color:${bCol}; min-width:36px; text-align:right;">${a.battery?.label ?? '--'}</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // 3. Chronological Event Log
+  const eventsHtml = events.map(ev => {
+    const evCol = ev.severity === "critical" ? "#ef4444" : (ev.severity === "warning" ? "#f59e0b" : "#38bdf8");
+    return `
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:0.75rem; padding:0.45rem 0.65rem; border-radius:10px; background:rgba(148,163,184,0.07); border-left:3px solid ${evCol};">
+        <div style="display:flex; gap:0.45rem; align-items:flex-start;">
+          <span>${ev.icon || '🛡️'}</span>
+          <div>
+            <div style="font-size:0.8rem; font-weight:700; color:var(--modal-text);">${ev.title} <span style="font-weight:500; font-size:0.72rem; color:var(--modal-text-muted);">(${ev.source})</span></div>
+            <div style="font-size:0.72rem; color:var(--modal-text-muted);">${ev.detail || ''}</div>
+          </div>
+        </div>
+        <span style="font-size:0.7rem; color:var(--modal-text-muted); white-space:nowrap;">${ev.ts || ''}</span>
+      </div>
+    `;
+  }).join("") || `<p style="font-size:0.78rem; color:var(--modal-text-muted); margin:0;">Sin eventos registrados todavía.</p>`;
+
+  body.innerHTML = `
+    <!-- Panel Superior: Estado Centralita + Controles de Armado -->
+    <div class="domos-modal-subcard" style="padding:0.95rem 1.2rem; border-radius:18px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0.85rem; border:1px solid ${al.mode_color || '#10b981'}44;">
+      <div>
+        <div style="font-size:0.72rem; font-weight:700; text-transform:uppercase; color:var(--modal-text-muted);">Estado Centralita (${al.ip || 'LAN'})</div>
+        <div style="font-size:1.3rem; font-weight:800; color:${al.mode_color || '#10b981'}; margin-top:2px;">🛡️ ${al.mode_label || 'Desarmada'}</div>
+        <div style="font-size:0.75rem; color:var(--modal-text-muted); margin-top:2px;">
+          🔋 Batería respaldo: <b>${al.battery?.label ?? '100%'}</b> · Conexión: <b>LAN local</b>${al.alarm_msg_text ? ` · Último aviso: <b>${al.alarm_msg_text}</b>` : ''}
+        </div>
+      </div>
+      <div style="display:flex; gap:0.45rem; flex-wrap:wrap;">
+        <button type="button" class="liquid-action-pill btn-alarm-mode-cmd alarm-btn-disarm ${mode === 'disarmed' ? 'is-disarm-active' : ''}" data-mode="disarmed" style="cursor:pointer; padding:0.45rem 0.95rem; font-size:0.82rem; font-weight:700;">🔓 Desarmar</button>
+        <button type="button" class="liquid-action-pill btn-alarm-mode-cmd alarm-btn-home ${mode === 'home' ? 'is-home-active' : ''}" data-mode="home" style="cursor:pointer; padding:0.45rem 0.95rem; font-size:0.82rem; font-weight:700;">🏠 En Casa</button>
+        <button type="button" class="liquid-action-pill btn-alarm-mode-cmd alarm-btn-arm ${mode === 'arm' ? 'is-arm-active' : ''}" data-mode="arm" style="cursor:pointer; padding:0.45rem 0.95rem; font-size:0.82rem; font-weight:700;">🔒 Armar Total</button>
+      </div>
+    </div>
+
+    <!-- Esquema de Distribución por Zonas -->
+    <div>
+      <div style="font-size:0.78rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:var(--modal-text-muted); margin-bottom:0.5rem;">🗺️ Esquema de Distribución de Sensores por Zonas</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(290px, 1fr)); gap:0.65rem;">
+        ${zonesHtml}
+      </div>
+    </div>
+
+    <!-- Estado de Carga de Pilas de Accesorios -->
+    <div class="domos-modal-subcard" style="padding:0.9rem 1.1rem; border-radius:18px; display:flex; flex-direction:column; gap:0.5rem;">
+      <div style="font-size:0.78rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:var(--modal-text-muted);">🔋 Estado y Carga de Pilas de Accesorios (${accessories.length})</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:0.45rem;">
+        ${accRowsHtml}
+      </div>
+    </div>
+
+    <!-- Log de Eventos -->
+    <div class="domos-modal-subcard" style="padding:0.9rem 1.1rem; border-radius:18px; display:flex; flex-direction:column; gap:0.45rem;">
+      <div style="font-size:0.78rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:var(--modal-text-muted);">📋 Registro de Eventos de Seguridad</div>
+      <div style="display:flex; flex-direction:column; gap:0.35rem; max-height:190px; overflow-y:auto;">
+        ${eventsHtml}
+      </div>
+    </div>
+  `;
+
+  body.querySelectorAll(".btn-alarm-mode-cmd").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const m = btn.getAttribute("data-mode");
+      await sendDeviceCommand(al.id || "64326051e8db8480acc0", "master_mode", m);
+      setTimeout(openAlarmModal, 600);
+    });
+  });
+}
+
+
+// ========================================================
+// ENERGY SAVINGS / SMART AUTOCONSUMO MODAL & API
+// ========================================================
+window.energySavingsData = null;
+
+async function fetchEnergySavings(renderModal = false) {
+  try {
+    const res = await fetch("/api/energy/savings");
+    if (res.ok) {
+      window.energySavingsData = await res.json();
+      if (typeof renderEnergyGrid === "function") renderEnergyGrid();
+      if (renderModal) renderEnergySavingsModalBody();
+    }
+  } catch (e) {}
+}
+
+window.openEnergySavingsModal = async function() {
+  const modal = document.getElementById("energy-savings-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  modal.style.display = "flex";
+  await fetchEnergySavings(true);
+};
+
+window.closeEnergySavingsModal = function() {
+  const modal = document.getElementById("energy-savings-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.style.display = "none";
+};
+
+window.setEnergySavingsMode = async function(mode) {
+  try {
+    const res = await fetch("/api/energy/savings/mode", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode })
+    });
+    if (res.ok) {
+      window.energySavingsData = await res.json();
+      if (typeof renderEnergyGrid === "function") renderEnergyGrid();
+      renderEnergySavingsModalBody();
+    }
+  } catch (e) {}
+};
+
+function renderEnergySavingsModalBody() {
+  const body = document.getElementById("energy-savings-modal-body");
+  const badge = document.getElementById("esav-modal-badge");
+  const d = window.energySavingsData;
+  if (!body || !d) return;
+
+  const cfg = d.config || { mode: "auto", source: "auto", rules: [] };
+  const tel = d.telemetry || {};
+  const statuses = Object.fromEntries((d.rules_status || []).map(x => [x.id, x]));
+  const sum = d.summary || {};
+
+  if (badge) {
+    const map = {
+      auto: ["Autoconsumo Activo", "rgba(16,185,129,0.16)", "#10b981"],
+      paused: ["Pausado (Manual)", "rgba(245,158,11,0.18)", "#f59e0b"],
+      vacation: ["Modo Vacaciones", "rgba(59,130,246,0.18)", "#3b82f6"]
+    };
+    const [txt, bg, col] = map[cfg.mode] || map.auto;
+    badge.textContent = txt;
+    badge.style.background = bg;
+    badge.style.color = col;
+    badge.style.borderColor = col;
+  }
+
+  const meterChip = tel.meter_online
+    ? `<span style="color:#10b981; font-weight:700;">● Doble pinza online (${tel.net_surplus_w ?? 0} W excedente)</span>`
+    : `<span style="color:#f59e0b; font-weight:600;">○ Doble pinza en espera · Usando generación Hoymiles</span>`;
+
+  const rulesHtml = (cfg.rules || []).map((r, idx) => {
+    const st = statuses[r.id] || {};
+    return `
+      <div class="esav-rule-card" data-rule-idx="${idx}" data-rule-id="${r.id}">
+        <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0.5rem;">
+          <div style="display:flex; align-items:center; gap:0.5rem;">
+            <span style="font-size:1.2rem;">${r.icon || "⚡"}</span>
+            <strong style="font-size:0.95rem; color:var(--modal-text);">${r.name}</strong>
+            <span class="sub-metric-pill" style="font-size:0.72rem;">Prioridad ${r.priority}</span>
+            <span class="sub-metric-pill" style="font-size:0.72rem; background:${st.is_on ? 'rgba(16,185,129,0.18)' : 'rgba(148,163,184,0.18)'}; color:${st.is_on ? '#10b981' : 'var(--modal-text-muted)'};">${st.status_label || "En espera"}</span>
+          </div>
+          <label style="display:flex; align-items:center; gap:0.4rem; cursor:pointer; font-size:0.84rem; font-weight:700; color:var(--modal-text);">
+            <input type="checkbox" class="esav-enabled" ${r.enabled ? "checked" : ""} style="width:18px; height:18px; accent-color:#10b981;">
+            Regla activa
+          </label>
+        </div>
+
+        <div class="esav-fields-grid">
+          <div class="esav-field">
+            <label>Encender ≥ (W)</label>
+            <input type="number" class="esav-on-w" min="50" max="5000" step="50" value="${r.on_threshold_w}">
+          </div>
+          <div class="esav-field">
+            <label>Apagar &lt; (W) (Histéresis)</label>
+            <input type="number" class="esav-off-w" min="0" max="4900" step="50" value="${r.off_threshold_w}">
+          </div>
+          <div class="esav-field">
+            <label>Espera encendido (min)</label>
+            <input type="number" class="esav-sustain-on" min="0" max="60" value="${r.sustain_on_min}">
+          </div>
+          <div class="esav-field">
+            <label>Anti-nubes apagado (min)</label>
+            <input type="number" class="esav-sustain-off" min="0" max="60" value="${r.sustain_off_min}">
+          </div>
+          <div class="esav-field">
+            <label>Mínimo encendido (min)</label>
+            <input type="number" class="esav-min-on" min="0" max="120" value="${r.min_on_min}">
+          </div>
+          <div class="esav-field">
+            <label>Máximo diario (min)</label>
+            <input type="number" class="esav-max-daily" min="10" max="720" value="${r.max_daily_min}">
+          </div>
+          <div class="esav-field">
+            <label>Horario inicio</label>
+            <input type="time" class="esav-time-start" value="${r.time_start || "10:00"}">
+          </div>
+          <div class="esav-field">
+            <label>Horario fin</label>
+            <input type="time" class="esav-time-end" value="${r.time_end || "18:30"}">
+          </div>
+          <div class="esav-field">
+            <label>Presencia / Casa</label>
+            <select class="esav-presence">
+              <option value="any" ${r.presence_condition === "any" ? "selected" : ""}>Siempre (cualquier estado)</option>
+              <option value="away_only" ${r.presence_condition === "away_only" ? "selected" : ""}>Solo ausente (Alarma armada)</option>
+              <option value="home_only" ${r.presence_condition === "home_only" ? "selected" : ""}>Solo en casa (Desarmada)</option>
+            </select>
+          </div>
+          <div class="esav-field">
+            <label>Prioridad cascada</label>
+            <input type="number" class="esav-priority" min="1" max="10" value="${r.priority}">
+          </div>
+        </div>
+
+        <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.8rem; color:var(--modal-text-muted); cursor:pointer;">
+          <input type="checkbox" class="esav-auto-cutoff" ${r.auto_cutoff_idle ? "checked" : ""} style="width:16px; height:16px; accent-color:#0ea5e9;">
+          Auto-apagar y ceder excedente al terminar de calentar (&lt; ${r.idle_watts || 35} W durante ${r.idle_cutoff_min || 10} min)
+        </label>
+      </div>
+    `;
+  }).join("");
+
+  const histHtml = (d.history || []).length
+    ? (d.history || []).slice(0, 8).map(h => `
+        <div style="display:flex; justify-content:space-between; gap:0.75rem; font-size:0.78rem; padding:0.32rem 0; border-bottom:1px solid var(--modal-subcard-border);">
+          <span>${h.icon || "🌱"} <b>${h.device}</b> · ${h.action} — <span style="color:var(--modal-text-muted);">${h.detail}</span></span>
+          <span style="color:var(--modal-text-muted); white-space:nowrap;">${h.ts}</span>
+        </div>
+      `).join("")
+    : `<div style="font-size:0.8rem; color:var(--modal-text-muted);">Sin actuaciones automáticas todavía hoy.</div>`;
+
+  body.innerHTML = `
+    <!-- Barra de modo rápido y origen de medida -->
+    <div class="domos-modal-subcard" style="padding:0.85rem 1rem; border-radius:16px; display:flex; flex-direction:column; gap:0.7rem;">
+      <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0.6rem;">
+        <div style="display:flex; flex-wrap:wrap; gap:0.45rem;">
+          <button type="button" class="esav-mode-btn ${cfg.mode === "auto" ? "active-auto" : ""}" onclick="setEnergySavingsMode('auto')">☀️ Autoconsumo</button>
+          <button type="button" class="esav-mode-btn ${cfg.mode === "paused" ? "active-paused" : ""}" onclick="setEnergySavingsMode('paused')">⏸️ Pausa / Manual</button>
+          <button type="button" class="esav-mode-btn ${cfg.mode === "vacation" ? "active-vacation" : ""}" onclick="setEnergySavingsMode('vacation')">✈️ Vacaciones</button>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.5rem;">
+          <span style="font-size:0.78rem; color:var(--modal-text-muted);">Origen:</span>
+          <select id="esav-source-select" class="domos-modal-input" style="padding:0.35rem 0.65rem; border-radius:10px; font-size:0.8rem; font-weight:600;">
+            <option value="auto" ${cfg.source === "auto" ? "selected" : ""}>🔄 Automático (Doble Pinza / Hoymiles)</option>
+            <option value="solar_gen" ${cfg.source === "solar_gen" ? "selected" : ""}>☀️ Generación Solar (Hoymiles)</option>
+            <option value="net_surplus" ${cfg.source === "net_surplus" ? "selected" : ""}>⚡ Excedente Neto (Doble Pinza)</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0.5rem; font-size:0.79rem; padding-top:0.45rem; border-top:1px solid var(--modal-subcard-border);">
+        <div>${meterChip}</div>
+        <div style="display:flex; flex-wrap:wrap; gap:0.75rem;">
+          <span>🏠 Casa: <b>${tel.is_away ? "Ausente (Armada)" : "En casa"}</b></span>
+          <span>🌱 Ahorro hoy: <b>${sum.total_saved_kwh_today ?? 0} kWh</b></span>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:0.45rem;">
+        <div style="padding:0.42rem 0.55rem; border-radius:12px; background:rgba(245,158,11,0.10); border:1px solid rgba(245,158,11,0.25); text-align:center;">
+          <div style="font-size:0.68rem; color:var(--modal-text-muted);">☀️ Generación Solar</div>
+          <div style="font-size:0.96rem; font-weight:800; color:#d97706;">${tel.solar_w ?? 0} W</div>
+        </div>
+        <div style="padding:0.42rem 0.55rem; border-radius:12px; background:rgba(99,102,241,0.10); border:1px solid rgba(99,102,241,0.25); text-align:center;">
+          <div style="font-size:0.68rem; color:var(--modal-text-muted);">🏠 Consumo Hogar</div>
+          <div style="font-size:0.96rem; font-weight:800; color:#6366f1;">${tel.meter_online ? `${tel.home_load_w ?? 0} W` : "— W"}</div>
+        </div>
+        <div style="padding:0.42rem 0.55rem; border-radius:12px; background:rgba(14,165,233,0.10); border:1px solid rgba(14,165,233,0.25); text-align:center;">
+          <div style="font-size:0.68rem; color:var(--modal-text-muted);">🔌 Flujo Red</div>
+          <div style="font-size:0.96rem; font-weight:800; color:${(tel.grid_w ?? 0) < 0 ? '#10b981' : '#0284c7'};">${tel.meter_online ? `${(tel.grid_w ?? 0) < 0 ? 'Export ' + Math.abs(tel.grid_w) : 'Import ' + (tel.grid_w ?? 0)} W` : "Esperando pinza"}</div>
+        </div>
+        <div style="padding:0.42rem 0.55rem; border-radius:12px; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.30); text-align:center;">
+          <div style="font-size:0.68rem; color:var(--modal-text-muted);">⚡ Excedente Útil</div>
+          <div style="font-size:0.96rem; font-weight:800; color:#10b981;">${tel.base_avail_w ?? 0} W</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Asesor Agua Caliente / Termosifón (preparado para válvulas Tuya) -->
+    ${d.hot_water ? `
+      <div class="domos-modal-subcard" style="padding:0.75rem 1rem; border-radius:16px; border-left:4px solid ${d.hot_water.badge_color || '#f59e0b'}; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0.5rem;">
+        <div>
+          <div style="font-size:0.84rem; font-weight:700; color:var(--modal-text);">🚿 Agua Caliente (Termosifón): ${d.hot_water.recommended_label}</div>
+          <div style="font-size:0.75rem; color:var(--modal-text-muted); margin-top:2px;">${d.hot_water.reason}</div>
+        </div>
+        <span class="sub-metric-pill" style="font-size:0.72rem;">${d.hot_water.valves_configured ? "✅ 2 Válvulas Tuya vinculadas" : "🔧 Listo para 2 válvulas Tuya"}</span>
+      </div>
+    ` : ""}
+
+    <!-- Reglas configurables por dispositivo -->
+    ${rulesHtml}
+
+    <!-- Registro de decisiones -->
+    <div class="domos-modal-subcard" style="padding:0.8rem 1rem; border-radius:16px;">
+      <div style="font-size:0.82rem; font-weight:700; margin-bottom:0.45rem; color:var(--modal-text);">📋 Registro de actuaciones de ahorro</div>
+      ${histHtml}
+    </div>
+  `;
+}
+
+window.saveEnergySavingsRules = async function() {
+  const d = window.energySavingsData;
+  if (!d) return;
+  const btn = document.getElementById("btn-esav-save");
+  const srcEl = document.getElementById("esav-source-select");
+  const cards = document.querySelectorAll("#energy-savings-modal-body .esav-rule-card");
+  const updatedRules = (d.config?.rules || []).map((orig, idx) => {
+    const card = cards[idx];
+    if (!card) return orig;
+    return {
+      ...orig,
+      enabled: !!card.querySelector(".esav-enabled")?.checked,
+      priority: parseInt(card.querySelector(".esav-priority")?.value, 10) || orig.priority,
+      on_threshold_w: parseInt(card.querySelector(".esav-on-w")?.value, 10) || orig.on_threshold_w,
+      off_threshold_w: parseInt(card.querySelector(".esav-off-w")?.value, 10) || orig.off_threshold_w,
+      sustain_on_min: parseInt(card.querySelector(".esav-sustain-on")?.value, 10) || 0,
+      sustain_off_min: parseInt(card.querySelector(".esav-sustain-off")?.value, 10) || 0,
+      min_on_min: parseInt(card.querySelector(".esav-min-on")?.value, 10) || 0,
+      max_daily_min: parseInt(card.querySelector(".esav-max-daily")?.value, 10) || 180,
+      time_start: card.querySelector(".esav-time-start")?.value || "10:00",
+      time_end: card.querySelector(".esav-time-end")?.value || "18:30",
+      presence_condition: card.querySelector(".esav-presence")?.value || "any",
+      auto_cutoff_idle: !!card.querySelector(".esav-auto-cutoff")?.checked
+    };
+  });
+
+  if (btn) btn.textContent = "⏳ Guardando...";
+  try {
+    const res = await fetch("/api/energy/savings/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: d.config?.mode || "auto",
+        source: srcEl ? srcEl.value : (d.config?.source || "auto"),
+        rules: updatedRules
+      })
+    });
+    if (res.ok) {
+      window.energySavingsData = await res.json();
+      if (typeof renderEnergyGrid === "function") renderEnergyGrid();
+      renderEnergySavingsModalBody();
+      if (btn) btn.textContent = "✅ Guardado";
+      setTimeout(() => { if (btn) btn.textContent = "💾 Guardar Reglas"; }, 2200);
+    }
+  } catch (e) {
+    if (btn) btn.textContent = "💾 Guardar Reglas";
+  }
+};
+
+fetchEnergySavings(false);
+setInterval(() => fetchEnergySavings(false), 30000);
+
+
+// ========================================================
+// AUTOMATIC & MANUAL BACKUPS MODAL
+// ========================================================
+window.openBackupsModal = async function() {
+  const modal = document.getElementById("backups-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  modal.style.display = "flex";
+  await loadBackupsList();
+};
+
+window.closeBackupsModal = function() {
+  const modal = document.getElementById("backups-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.style.display = "none";
+};
+
+async function loadBackupsList() {
+  const body = document.getElementById("backups-modal-body");
+  if (!body) return;
+  try {
+    const res = await fetch("/api/system/backups");
+    const d = await res.json();
+    const sdBadge = d.sd_mounted
+      ? `<span style="color:#10b981; font-weight:700;">● Espejo SD activo (${d.sd_dir})</span>`
+      : `<span style="color:#f59e0b; font-weight:600;">○ Solo almacenamiento interno</span>`;
+    const rows = (d.backups || []).length
+      ? d.backups.map(b => `
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:0.65rem; padding:0.55rem 0.75rem; border-radius:12px; background:var(--modal-subcard-bg); border:1px solid var(--modal-subcard-border);">
+            <div style="min-width:0;">
+              <div style="font-size:0.82rem; font-weight:700; color:var(--modal-text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${b.filename}</div>
+              <div style="font-size:0.74rem; color:var(--modal-text-muted);">${b.date} · ${b.size_kb} KB ${b.sd_mirrored ? "· ✅ Copiado en SD" : ""}</div>
+            </div>
+            <a href="/api/system/backup/download/${encodeURIComponent(b.filename)}" class="liquid-action-pill" style="text-decoration:none; font-size:0.76rem; padding:0.28rem 0.65rem; white-space:nowrap;">⬇️ Descargar</a>
+          </div>
+        `).join("")
+      : `<div style="font-size:0.82rem; color:var(--modal-text-muted); text-align:center;">Aún no hay copias guardadas. Pulsa "Crear Copia Ahora".</div>`;
+
+    body.innerHTML = `
+      <div class="domos-modal-subcard" style="padding:0.75rem 0.95rem; border-radius:14px; font-size:0.8rem; display:flex; flex-direction:column; gap:0.35rem;">
+        <div>🕒 <b>Programación:</b> ${d.schedule || "Diario 04:00"}</div>
+        <div>💾 ${sdBadge}</div>
+        <div style="color:var(--modal-text-muted); font-size:0.74rem;">Incluye toda la configuración (*.json), credenciales Tuya/Hoymiles, historiales, scripts y servicios systemd.</div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:0.45rem;">${rows}</div>
+    `;
+  } catch (e) {
+    body.innerHTML = `<p style="color:#ef4444;">Error al consultar las copias de seguridad.</p>`;
+  }
+}
+
+window.triggerManualBackup = async function() {
+  const btn = document.getElementById("btn-run-backup-now");
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Creando..."; }
+  try {
+    const res = await fetch("/api/system/backup", { method: "POST" });
+    if (res.ok) {
+      await loadBackupsList();
+      if (btn) btn.textContent = "✅ Copia creada";
+      setTimeout(() => { if (btn) { btn.disabled = false; btn.textContent = "💾 Crear Copia Ahora"; } }, 2200);
+      return;
+    }
+  } catch (e) {}
+  if (btn) { btn.disabled = false; btn.textContent = "💾 Crear Copia Ahora"; }
+};
+
+
+window.toggleAirPurifierAuto = async function() {
+  const curEnabled = latestAirQualityData?.air_auto?.config?.enabled !== false;
+  try {
+    const res = await fetch("/api/air/auto", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !curEnabled })
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      if (latestAirQualityData) latestAirQualityData.air_auto = updated;
+      renderAirQualityModalContent();
+    }
+  } catch (e) {}
+};
+
+
+// ========================================================
+// GOOGLE CAST SPEAKERS & MULTI-ROOM INTERCOM MODAL
+// ========================================================
+let castSelectedTarget = "all";
+
+window.openCastModal = async function() {
+  const modal = document.getElementById("cast-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  modal.style.display = "flex";
+  await loadCastModalBody();
+};
+
+window.closeCastModal = function() {
+  const modal = document.getElementById("cast-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.style.display = "none";
+};
+
+window.selectCastIntercomTarget = function(target) {
+  castSelectedTarget = target;
+  document.querySelectorAll(".cast-target-pill").forEach(b => {
+    const act = b.getAttribute("data-ct") === target;
+    b.style.background = act ? "rgba(14,165,233,0.25)" : "";
+    b.style.borderColor = act ? "#38bdf8" : "";
+    b.style.fontWeight = act ? "700" : "";
+  });
+};
+
+window.sendCastAnnouncement = async function(customText) {
+  const input = document.getElementById("cast-announce-input");
+  const statusEl = document.getElementById("cast-announce-status");
+  const text = (customText || input?.value || "").trim();
+  if (!text) return;
+  if (statusEl) statusEl.textContent = "⏳ Enviando aviso de voz...";
+  try {
+    const res = await fetch("/api/cast/announce", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targets: castSelectedTarget, text })
+    });
+    const d = await res.json();
+    if (statusEl) statusEl.textContent = d.success ? `✅ Anunciado en ${castSelectedTarget === "all" ? "todos los altavoces" : castSelectedTarget}` : `⚠️ ${d.error || "No se pudo reproducir"}`;
+    if (!customText && input) input.value = "";
+  } catch (e) {
+    if (statusEl) statusEl.textContent = "⚠️ Error de red";
+  }
+};
+
+window.toggleCastDoorbellSetting = async function(key, val, speakerId = null) {
+  const payload = speakerId ? { speaker_doorbell: { [speakerId]: !!val } } : { [key]: !!val };
+  try {
+    await fetch("/api/cast/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    await loadCastModalBody();
+  } catch (e) {}
+};
+
+async function loadCastModalBody() {
+  const body = document.getElementById("cast-modal-body");
+  if (!body) return;
+  try {
+    const res = await fetch("/api/cast/speakers");
+    const d = await res.json();
+    const sps = d.speakers || [];
+    const targetPills = [
+      { id: "all", label: "🏠 Todos (3)" },
+      ...sps.map(s => ({ id: s.id, label: `${s.icon || "🔊"} ${s.name}` }))
+    ].map(t => `
+      <button type="button" class="liquid-action-pill cast-target-pill" data-ct="${t.id}" onclick="selectCastIntercomTarget('${t.id}')" style="cursor:pointer; font-size:0.78rem; padding:0.28rem 0.65rem; ${castSelectedTarget === t.id ? 'background:rgba(14,165,233,0.25); border-color:#38bdf8; font-weight:700;' : ''}">${t.label}</button>
+    `).join("");
+
+    const spRows = sps.map(s => `
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:0.55rem 0.75rem; border-radius:12px; background:var(--modal-subcard-bg); border:1px solid var(--modal-subcard-border);">
+        <div>
+          <div style="font-size:0.86rem; font-weight:700; color:var(--modal-text);">${s.icon || "🔊"} ${s.name} <span style="font-size:0.74rem; font-weight:500; color:var(--modal-text-muted);">(${s.model})</span></div>
+          <div style="font-size:0.72rem; color:var(--modal-text-muted);">LAN ${s.host}:${s.port}</div>
+        </div>
+        <label style="display:flex; align-items:center; gap:0.35rem; font-size:0.78rem; cursor:pointer; color:var(--modal-text);">
+          <input type="checkbox" ${s.doorbell_enabled ? "checked" : ""} onchange="toggleCastDoorbellSetting(null, this.checked, '${s.id}')" style="width:16px; height:16px; accent-color:#10b981;">
+          🔔 Timbre
+        </label>
+      </div>
+    `).join("");
+
+    body.innerHTML = `
+      <!-- Intercomunicador -->
+      <div class="domos-modal-subcard" style="padding:0.85rem 1rem; border-radius:16px; display:flex; flex-direction:column; gap:0.6rem;">
+        <div style="font-size:0.86rem; font-weight:700; color:var(--modal-text);">📢 Intercomunicador Familiar (Voz Piper)</div>
+        <div style="display:flex; flex-wrap:wrap; gap:0.35rem;">${targetPills}</div>
+        <div style="display:flex; gap:0.45rem;">
+          <input id="cast-announce-input" type="text" class="domos-modal-input" placeholder="Escribe un aviso para anunciar por voz..." style="flex:1; padding:0.48rem 0.75rem; border-radius:12px; font-size:0.84rem;" onkeydown="if(event.key==='Enter') sendCastAnnouncement()">
+          <button type="button" class="liquid-action-pill" onclick="sendCastAnnouncement()" style="cursor:pointer; background:rgba(14,165,233,0.25); border-color:#38bdf8; font-weight:700;">📣 Anunciar</button>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:0.35rem;">
+          <button type="button" class="liquid-action-pill" onclick="sendCastAnnouncement('¡La comida está lista en la mesa!')" style="cursor:pointer; font-size:0.75rem; padding:0.25rem 0.6rem;">🍽️ ¡A comer!</button>
+          <button type="button" class="liquid-action-pill" onclick="sendCastAnnouncement('¡La cena está lista!')" style="cursor:pointer; font-size:0.75rem; padding:0.25rem 0.6rem;">🌙 ¡A cenar!</button>
+          <button type="button" class="liquid-action-pill" onclick="sendCastAnnouncement('¿Podéis venir un momento al salón?')" style="cursor:pointer; font-size:0.75rem; padding:0.25rem 0.6rem;">👋 Venid al salón</button>
+          <button type="button" class="liquid-action-pill" onclick="sendCastAnnouncement('Atención, alguien está llamando al videoportero.')" style="cursor:pointer; font-size:0.75rem; padding:0.25rem 0.6rem;">🔔 Probar timbre</button>
+        </div>
+        <div id="cast-announce-status" style="font-size:0.76rem; color:var(--modal-text-muted); min-height:1rem;"></div>
+      </div>
+
+      <!-- Configuración de Timbre Multi-habitación -->
+      <div class="domos-modal-subcard" style="padding:0.85rem 1rem; border-radius:16px; display:flex; flex-direction:column; gap:0.55rem;">
+        <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0.5rem;">
+          <div style="font-size:0.86rem; font-weight:700; color:var(--modal-text);">🔔 Timbre Videoportero en Altavoces Google</div>
+          <label style="display:flex; align-items:center; gap:0.35rem; font-size:0.8rem; font-weight:700; cursor:pointer;">
+            <input type="checkbox" ${d.doorbell_cast_enabled ? "checked" : ""} onchange="toggleCastDoorbellSetting('doorbell_cast_enabled', this.checked)" style="width:17px; height:17px; accent-color:#10b981;">
+            Activado
+          </label>
+        </div>
+        <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.76rem; color:var(--modal-text-muted); cursor:pointer;">
+          <input type="checkbox" ${d.quiet_night_dormitorio ? "checked" : ""} onchange="toggleCastDoorbellSetting('quiet_night_dormitorio', this.checked)" style="width:15px; height:15px; accent-color:#0ea5e9;">
+          🌙 Silenciar Dormitorio 1 por la noche (23:00–08:00)
+        </label>
+        <div style="display:flex; flex-direction:column; gap:0.4rem;">${spRows}</div>
+      </div>
+    `;
+  } catch (e) {
+    body.innerHTML = `<p style="color:#ef4444;">Error cargando altavoces Google.</p>`;
+  }
+}
+
+
+// ========================================================
+// DOCTOR DOMOS MODAL (Nightly Hybrid Auditor + Gemini AI + Auto-Heal)
+// ========================================================
+window.openDoctorModal = async function() {
+  const modal = document.getElementById("doctor-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  modal.style.display = "flex";
+  await loadDoctorReport();
+};
+
+let doctorIsSpeaking = false;
+
+window.toggleDoctorSpeak = async function() {
+  const btn = document.getElementById("btn-doctor-speak");
+  if (doctorIsSpeaking) {
+    doctorIsSpeaking = false;
+    if (btn) btn.textContent = "🔊 Leer Informe";
+    try { await fetch("/api/doctor/speak/stop", { method: "POST" }); } catch (e) {}
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Generando voz..."; }
+  try {
+    const res = await fetch("/api/doctor/speak", { method: "POST" });
+    const d = await res.json();
+    if (d.success) {
+      doctorIsSpeaking = true;
+      if (btn) { btn.disabled = false; btn.textContent = "⏹ Parar Lectura"; }
+      setTimeout(() => {
+        if (doctorIsSpeaking) {
+          doctorIsSpeaking = false;
+          if (btn) btn.textContent = "🔊 Leer Informe";
+        }
+      }, 45000);
+      return;
+    }
+  } catch (e) {}
+  if (btn) { btn.disabled = false; btn.textContent = "🔊 Leer Informe"; }
+};
+
+window.closeDoctorModal = function() {
+  if (doctorIsSpeaking) {
+    doctorIsSpeaking = false;
+    const btn = document.getElementById("btn-doctor-speak");
+    if (btn) btn.textContent = "🔊 Leer Informe";
+    fetch("/api/doctor/speak/stop", { method: "POST" }).catch(() => {});
+  }
+  const modal = document.getElementById("doctor-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.style.display = "none";
+};
+
+async function loadDoctorReport() {
+  const body = document.getElementById("doctor-modal-body");
+  if (!body) return;
+  try {
+    const res = await fetch("/api/doctor/report");
+    const d = await res.json();
+    renderDoctorModalBody(d);
+  } catch (e) {
+    body.innerHTML = `<p style="color:#ef4444;">Error al cargar el informe de Doctor DOMOS.</p>`;
+  }
+}
+
+window.runDoctorNow = async function() {
+  const btn = document.getElementById("btn-run-doctor-now");
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Analizando..."; }
+  try {
+    const res = await fetch("/api/doctor/run", { method: "POST" });
+    if (res.ok) {
+      const d = await res.json();
+      renderDoctorModalBody(d);
+    }
+  } catch (e) {}
+  if (btn) { btn.disabled = false; btn.textContent = "🩺 Diagnosticar Ahora"; }
+};
+
+window.saveDoctorSettings = async function() {
+  const autoHeal = !!document.getElementById("doctor-auto-heal-chk")?.checked;
+  const statusEl = document.getElementById("doctor-cfg-status");
+  try {
+    const res = await fetch("/api/doctor/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auto_heal_enabled: autoHeal })
+    });
+    if (res.ok && statusEl) {
+      statusEl.textContent = "✅ Guardado";
+      setTimeout(() => { statusEl.textContent = ""; }, 2000);
+    }
+  } catch (e) {}
+};
+
+function renderDoctorModalBody(data) {
+  const body = document.getElementById("doctor-modal-body");
+  const badge = document.getElementById("doctor-score-badge");
+  if (!body || !data) return;
+  const rep = data.report || {};
+  const cfg = data.config || {};
+  const score = rep.health_score ?? 100;
+  const scCol = score >= 85 ? "#10b981" : (score >= 65 ? "#f59e0b" : "#ef4444");
+
+  if (badge) {
+    badge.textContent = `${score} / 100 · ${score >= 85 ? "Óptimo" : (score >= 65 ? "Atención" : "Crítico")}`;
+    badge.style.color = scCol;
+    badge.style.borderColor = scCol;
+    badge.style.background = `${scCol}22`;
+  }
+
+  const ai = rep.ai || {};
+  const checksHtml = (rep.checks || []).map(c => {
+    const col = c.status === "ok" ? "#10b981" : (c.status === "warning" ? "#f59e0b" : "#ef4444");
+    const lbl = c.status === "ok" ? "OK" : (c.status === "warning" ? "Aviso" : "Crítico");
+    return `
+      <div style="padding:0.65rem 0.8rem; border-radius:14px; background:var(--modal-subcard-bg); border:1px solid var(--modal-subcard-border); border-left:4px solid ${col};">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:0.4rem;">
+          <span style="font-size:0.84rem; font-weight:700; color:var(--modal-text);">${c.icon || "🔹"} ${c.name}</span>
+          <span style="font-size:0.7rem; font-weight:700; color:${col};">${lbl}</span>
+        </div>
+        <div style="font-size:0.75rem; color:var(--modal-text-muted); margin-top:3px;">${c.summary}</div>
+      </div>
+    `;
+  }).join("");
+
+  const actionsHtml = (rep.actions_taken || []).length
+    ? rep.actions_taken.map(a => `<div style="font-size:0.79rem; padding:0.25rem 0;">${a}</div>`).join("")
+    : `<div style="font-size:0.78rem; color:var(--modal-text-muted);">No fue necesaria ninguna auto-reparación en el último chequeo.</div>`;
+
+  const recsHtml = (rep.recommendations || []).map(r => `<li style="margin:0.2rem 0; font-size:0.8rem; color:var(--modal-text);">${r}</li>`).join("");
+
+  body.innerHTML = `
+    <!-- Análisis IA / Resumen Ejecutivo -->
+    <div class="domos-modal-subcard" style="padding:0.9rem 1.05rem; border-radius:16px; background:linear-gradient(135deg, rgba(139,92,246,0.12), rgba(14,165,233,0.08)); border:1px solid rgba(139,92,246,0.32);">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; margin-bottom:0.4rem;">
+        <span style="font-size:0.88rem; font-weight:700; color:var(--modal-text);">🧠 ${ai.used ? `Análisis Gemini (${ai.model})` : "Resumen Doctor DOMOS (Local)"}</span>
+        <span style="font-size:0.73rem; color:var(--modal-text-muted);">Último chequeo: ${rep.timestamp || "--"} · Nocturno ${cfg.nightly_time || "03:30"}</span>
+      </div>
+      <div style="font-size:0.83rem; color:var(--modal-text); line-height:1.45; white-space:pre-line;">${(ai.text || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\*\*(.+?)\*\*/g,"<b>$1</b>")}</div>
+      ${ai.error ? `<div style="font-size:0.74rem; color:#f59e0b; margin-top:0.35rem;">⚠️ Gemini: ${ai.error}</div>` : ""}
+    </div>
+
+    <!-- Subsistemas (7 tarjetas) -->
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); gap:0.55rem;">
+      ${checksHtml}
+    </div>
+
+    <!-- Recomendaciones y Auto-Reparaciones -->
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:0.7rem;">
+      <div class="domos-modal-subcard" style="padding:0.8rem 0.95rem; border-radius:16px;">
+        <div style="font-size:0.84rem; font-weight:700; margin-bottom:0.35rem; color:var(--modal-text);">💡 Recomendaciones</div>
+        <ul style="margin:0; padding-left:1.15rem;">${recsHtml}</ul>
+      </div>
+      <div class="domos-modal-subcard" style="padding:0.8rem 0.95rem; border-radius:16px;">
+        <div style="font-size:0.84rem; font-weight:700; margin-bottom:0.35rem; color:var(--modal-text);">🛠️ Acciones Seguras Ejecutadas</div>
+        ${actionsHtml}
+      </div>
+    </div>
+
+    <!-- Auto-reparación segura -->
+    <div class="domos-modal-subcard" style="padding:0.75rem 1rem; border-radius:16px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0.5rem;">
+      <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.82rem; font-weight:700; cursor:pointer; color:var(--modal-text);">
+        <input type="checkbox" id="doctor-auto-heal-chk" ${cfg.auto_heal_enabled ? "checked" : ""} onchange="saveDoctorSettings()" style="width:17px; height:17px; accent-color:#8b5cf6;">
+        🛠️ Auto-reparación segura activa (servicios caídos, backups atrasados, purificador en PM2.5 crítico)
+      </label>
+      <span id="doctor-cfg-status" style="font-size:0.74rem; color:#10b981; font-weight:600;"></span>
+    </div>
+  `;
+}
+
+
+// ========================================================
+// SD CARD FILE MANAGER (Strictly /media/storage inside Photo Source Modal)
+// ========================================================
+let sdFmCurrentPath = "Images";
+let sdFmParentPath = "";
+let sdFmAllFolders = [""];
+
+window.switchPhotoModalTab = function(tab) {
+  const tabCfg = document.getElementById("photo-modal-tab-cfg");
+  const tabSd = document.getElementById("photo-modal-tab-sd");
+  const btnCfg = document.getElementById("btn-photo-tab-cfg");
+  const btnSd = document.getElementById("btn-photo-tab-sd");
+  const isSd = tab === "sd";
+  if (tabCfg) tabCfg.style.display = isSd ? "none" : "flex";
+  if (tabSd) tabSd.style.display = isSd ? "flex" : "none";
+  if (btnCfg) {
+    btnCfg.style.background = !isSd ? "rgba(14,165,233,0.22)" : "";
+    btnCfg.style.borderColor = !isSd ? "#38bdf8" : "";
+    btnCfg.style.fontWeight = !isSd ? "700" : "";
+  }
+  if (btnSd) {
+    btnSd.style.background = isSd ? "rgba(14,165,233,0.22)" : "";
+    btnSd.style.borderColor = isSd ? "#38bdf8" : "";
+    btnSd.style.fontWeight = isSd ? "700" : "";
+  }
+  if (isSd) loadSdFileManager(sdFmCurrentPath);
+};
+
+function setSdFmStatus(msg, isErr = false) {
+  const el = document.getElementById("sd-fm-status");
+  if (!el) return;
+  if (!msg) { el.style.display = "none"; return; }
+  el.style.display = "block";
+  el.style.background = isErr ? "rgba(239,68,68,0.16)" : "rgba(16,185,129,0.16)";
+  el.style.color = isErr ? "#dc2626" : "#047857";
+  el.textContent = msg;
+  setTimeout(() => { el.style.display = "none"; }, 3500);
+}
+
+window.sdFmGoUp = function() {
+  if (sdFmParentPath !== null && sdFmParentPath !== undefined) {
+    loadSdFileManager(sdFmParentPath);
+  }
+};
+
+window.loadSdFileManager = async function(path = "") {
+  const listEl = document.getElementById("sd-fm-list");
+  const crumbEl = document.getElementById("sd-fm-breadcrumb");
+  const upBtn = document.getElementById("btn-sd-fm-up");
+  if (!listEl) return;
+  try {
+    const res = await fetch(`/api/sd/list?path=${encodeURIComponent(path)}`);
+    const d = await res.json();
+    if (!res.ok) {
+      if (path !== "") return loadSdFileManager("");
+      listEl.innerHTML = `<p style="color:#ef4444; font-size:0.82rem;">${d.error || "Error accediendo a la SD"}</p>`;
+      return;
+    }
+    sdFmCurrentPath = d.path || "";
+    sdFmParentPath = d.parent;
+    sdFmAllFolders = d.all_folders || [""];
+
+    if (crumbEl) crumbEl.textContent = `📁 SD / ${sdFmCurrentPath || "(Raíz)"}`;
+    if (upBtn) upBtn.style.display = sdFmParentPath !== null ? "inline-flex" : "none";
+
+    const folderOptions = sdFmAllFolders.map(f => `<option value="${f.replace(/"/g, "&quot;")}">${f ? "📁 " + f : "📁 (Raíz SD)"}</option>`).join("");
+
+    const folderRows = (d.folders || []).map(f => {
+      const safeP = f.path.replace(/'/g, "\'");
+      return `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem; padding:0.5rem 0.7rem; border-radius:12px; background:var(--modal-subcard-bg); border:1px solid var(--modal-subcard-border);">
+          <div onclick="loadSdFileManager('${safeP}')" style="display:flex; align-items:center; gap:0.55rem; cursor:pointer; flex:1; min-width:0;">
+            <span style="font-size:1.2rem;">📁</span>
+            <div style="min-width:0;">
+              <div style="font-size:0.84rem; font-weight:700; color:var(--modal-text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${f.name}</div>
+              <div style="font-size:0.71rem; color:var(--modal-text-muted);">${f.items} elemento(s)</div>
+            </div>
+          </div>
+          <div style="display:flex; gap:0.3rem;">
+            <button type="button" class="liquid-action-pill" onclick="loadSdFileManager('${safeP}')" style="cursor:pointer; font-size:0.72rem; padding:0.2rem 0.5rem;">Abrir</button>
+            ${f.items === 0 ? `<button type="button" class="liquid-action-pill" onclick="sdFmDelete('${safeP}', '${f.name.replace(/'/g, "\'")}')" style="cursor:pointer; font-size:0.72rem; padding:0.2rem 0.45rem; border-color:rgba(239,68,68,0.45); color:#dc2626;">🗑️</button>` : ""}
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    const fileRows = (d.files || []).map((f, idx) => {
+      const safeP = f.path.replace(/'/g, "\'");
+      const safeName = f.name.replace(/'/g, "\'");
+      const thumb = f.is_image
+        ? `<img src="/api/sd/thumb?path=${encodeURIComponent(f.path)}" loading="lazy" style="width:42px; height:42px; object-fit:cover; border-radius:8px; border:1px solid var(--modal-subcard-border); flex-shrink:0;">`
+        : `<span style="width:42px; height:42px; display:flex; align-items:center; justify-content:center; font-size:1.25rem; flex-shrink:0;">📄</span>`;
+      return `
+        <div style="display:flex; flex-direction:column; gap:0.35rem; padding:0.45rem 0.65rem; border-radius:12px; background:var(--modal-subcard-bg); border:1px solid var(--modal-subcard-border);">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:0.55rem;">
+            <div style="display:flex; align-items:center; gap:0.55rem; min-width:0; flex:1;">
+              ${thumb}
+              <div style="min-width:0;">
+                <div style="font-size:0.81rem; font-weight:600; color:var(--modal-text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${f.name}</div>
+                <div style="font-size:0.7rem; color:var(--modal-text-muted);">${f.size_kb} KB</div>
+              </div>
+            </div>
+            <div style="display:flex; gap:0.3rem; flex-shrink:0;">
+              <button type="button" class="liquid-action-pill" onclick="sdFmToggleMoveRow(${idx})" style="cursor:pointer; font-size:0.72rem; padding:0.22rem 0.5rem;">📦 Mover</button>
+              <button type="button" class="liquid-action-pill" onclick="sdFmDelete('${safeP}', '${safeName}')" style="cursor:pointer; font-size:0.72rem; padding:0.22rem 0.48rem; border-color:rgba(239,68,68,0.45); color:#dc2626;">🗑️</button>
+            </div>
+          </div>
+          <div id="sd-move-row-${idx}" style="display:none; align-items:center; gap:0.35rem; padding-top:0.25rem; border-top:1px solid var(--modal-subcard-border);">
+            <select id="sd-move-sel-${idx}" class="domos-modal-input" style="flex:1; padding:0.28rem 0.5rem; border-radius:8px; font-size:0.76rem;">${folderOptions}</select>
+            <button type="button" class="liquid-action-pill" onclick="sdFmConfirmMove('${safeP}', ${idx})" style="cursor:pointer; font-size:0.73rem; padding:0.24rem 0.55rem; background:rgba(16,185,129,0.22); border-color:#10b981; color:#047857; font-weight:700;">✓ Mover aquí</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    listEl.innerHTML = (folderRows + fileRows) || `<p style="color:var(--modal-text-muted); text-align:center; font-size:0.82rem;">Esta carpeta está vacía.</p>`;
+  } catch (e) {
+    listEl.innerHTML = `<p style="color:#ef4444; font-size:0.82rem;">Error de red al leer la SD.</p>`;
+  }
+};
+
+window.sdFmToggleMoveRow = function(idx) {
+  const row = document.getElementById(`sd-move-row-${idx}`);
+  if (!row) return;
+  row.style.display = row.style.display === "flex" ? "none" : "flex";
+};
+
+window.sdFmConfirmMove = async function(srcPath, idx) {
+  const sel = document.getElementById(`sd-move-sel-${idx}`);
+  if (!sel) return;
+  try {
+    const res = await fetch("/api/sd/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ src: srcPath, dst_dir: sel.value })
+    });
+    const d = await res.json();
+    if (res.ok && d.success) {
+      setSdFmStatus(`✅ Movido a ${sel.value || "(Raíz SD)"}`);
+      loadSdFileManager(sdFmCurrentPath);
+      if (typeof loadPhotoFolders === "function") loadPhotoFolders();
+    } else {
+      setSdFmStatus(`⚠️ ${d.error || "No se pudo mover"}`, true);
+    }
+  } catch (e) {
+    setSdFmStatus("⚠️ Error de red al mover", true);
+  }
+};
+
+window.sdFmDelete = async function(targetPath, label) {
+  if (!window.confirm(`¿Borrar "${label}" de la tarjeta SD? Esta acción no se puede deshacer.`)) return;
+  try {
+    const res = await fetch("/api/sd/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: targetPath })
+    });
+    const d = await res.json();
+    if (res.ok && d.success) {
+      setSdFmStatus(`🗑️ "${label}" borrado de la SD`);
+      loadSdFileManager(sdFmCurrentPath);
+      if (typeof loadPhotoFolders === "function") loadPhotoFolders();
+    } else {
+      setSdFmStatus(`⚠️ ${d.error || "No se pudo borrar"}`, true);
+    }
+  } catch (e) {
+    setSdFmStatus("⚠️ Error de red al borrar", true);
+  }
+};
+
+window.sdFmCreateFolder = async function() {
+  const name = window.prompt("Nombre de la nueva carpeta en la tarjeta SD:");
+  if (!name || !name.trim()) return;
+  try {
+    const res = await fetch("/api/sd/mkdir", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: sdFmCurrentPath, name: name.trim() })
+    });
+    const d = await res.json();
+    if (res.ok && d.success) {
+      setSdFmStatus(`📁 Carpeta "${name.trim()}" creada`);
+      loadSdFileManager(sdFmCurrentPath);
+      if (typeof loadPhotoFolders === "function") loadPhotoFolders();
+    } else {
+      setSdFmStatus(`⚠️ ${d.error || "No se pudo crear"}`, true);
+    }
+  } catch (e) {
+    setSdFmStatus("⚠️ Error de red", true);
+  }
+};
+
+
+// ========================================================
+// ANTI-BURN-IN: AUTO-CLOSE ALL MODALS & DRAWER AFTER 2 MIN IDLE
+// ========================================================
+const MODAL_IDLE_CLOSE_MS = 120000; // 2 minutos sin interacción
+let modalIdleCloseTimer = null;
+
+function closeAllModalsAndReturnToKiosk() {
+  // Call dedicated close handlers where available (stops streams/TTS cleanly, keeps Radio audio playing)
+  try { if (typeof closeCameraFullscreen === "function") closeCameraFullscreen(); } catch (e) {}
+  try { if (typeof closeDoctorModal === "function") closeDoctorModal(); } catch (e) {}
+  try { if (typeof closeCastModal === "function") closeCastModal(); } catch (e) {}
+  try { if (typeof closeBackupsModal === "function") closeBackupsModal(); } catch (e) {}
+  try { if (typeof closeEnergySavingsModal === "function") closeEnergySavingsModal(); } catch (e) {}
+  try { if (typeof closeAlarmModal === "function") closeAlarmModal(); } catch (e) {}
+  try { if (typeof closeAirQualityModal === "function") closeAirQualityModal(); } catch (e) {}
+
+  // Hide any remaining open modal backdrops
+  const modalIds = [
+    "weather-modal", "photo-source-modal", "alarm-details-modal", "security-alarm-modal",
+    "air-quality-modal", "energy-savings-modal", "backups-modal", "cast-modal", "doctor-modal",
+    "calendar-modal", "radio-modal", "cameras-modal", "solar-modal", "climate-history-modal",
+    "incidents-modal", "schedules-modal", "adguard-modal", "message-modal", "volume-safety-modal"
+  ];
+  modalIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && (el.style.display === "flex" || el.style.display === "block" || !el.classList.contains("hidden"))) {
+      el.classList.add("hidden");
+      el.style.display = "none";
+    }
+  });
+
+  // Close settings panel & Control Center drawer to return to photo carousel
+  const settingsPanel = document.getElementById("drawer-settings-panel");
+  if (settingsPanel) settingsPanel.classList.add("hidden");
+  const drawer = document.getElementById("control-drawer");
+  if (drawer && drawer.classList.contains("open")) {
+    drawer.classList.remove("open");
+  }
+}
+
+function resetModalIdleCloseTimer() {
+  if (modalIdleCloseTimer) clearTimeout(modalIdleCloseTimer);
+  modalIdleCloseTimer = setTimeout(() => {
+    closeAllModalsAndReturnToKiosk();
+  }, MODAL_IDLE_CLOSE_MS);
+}
+
+["pointerdown", "touchstart", "click", "scroll", "keydown", "input", "change"].forEach(ev => {
+  window.addEventListener(ev, resetModalIdleCloseTimer, { passive: true, capture: true });
+});
+resetModalIdleCloseTimer();
+
+
+// ========================================================
+// INDEPENDENT AUDIO VOLUME MIXER (General, Radio, Doorbell, Cameras)
+// ========================================================
+window.domosAudioVolumes = { master: 70, radio: 75, doorbell: 85, cameras: 85 };
+let audioVolDebounceTimers = {};
+
+function applyAudioVolumesToUI(vols) {
+  if (!vols) return;
+  window.domosAudioVolumes = { ...window.domosAudioVolumes, ...vols };
+  ["master", "radio", "doorbell", "cameras"].forEach(ch => {
+    const val = window.domosAudioVolumes[ch];
+    if (typeof val !== "number") return;
+    const slider = document.getElementById(`vol-${ch}-slider`);
+    const badge = document.getElementById(`vol-${ch}-val`);
+    if (slider) slider.value = val;
+    if (badge) badge.textContent = `${val}%`;
+  });
+  const camVid = document.getElementById("cam-fs-video");
+  if (camVid && !camVid.muted) {
+    camVid.volume = Math.max(0, Math.min(1, (window.domosAudioVolumes.cameras ?? 85) / 100));
+  }
+  const radioEl = document.getElementById("radio-audio-player") || window.radioAudio;
+  if (radioEl && typeof radioEl.volume === "number") {
+    radioEl.volume = Math.max(0, Math.min(1, (window.domosAudioVolumes.radio ?? 75) / 100));
+  }
+}
+
+async function loadAudioVolumes() {
+  try {
+    const res = await fetch("/api/audio/volumes");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.volumes) applyAudioVolumesToUI(data.volumes);
+    }
+  } catch (e) {}
+}
+
+function pushAudioVolumeChannel(channel, value) {
+  const num = Math.max(0, Math.min(100, parseInt(value, 10) || 0));
+  window.domosAudioVolumes[channel] = num;
+  const badge = document.getElementById(`vol-${channel}-val`);
+  if (badge) badge.textContent = `${num}%`;
+  if (channel === "cameras") {
+    const camVid = document.getElementById("cam-fs-video");
+    if (camVid && !camVid.muted) camVid.volume = num / 100;
+  }
+  if (audioVolDebounceTimers[channel]) clearTimeout(audioVolDebounceTimers[channel]);
+  audioVolDebounceTimers[channel] = setTimeout(async () => {
+    try {
+      await fetch("/api/audio/volumes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [channel]: num })
+      });
+    } catch (e) {}
+  }, 120);
+}
+
+["master", "radio", "doorbell", "cameras"].forEach(ch => {
+  const slider = document.getElementById(`vol-${ch}-slider`);
+  if (slider) {
+    slider.addEventListener("input", (e) => pushAudioVolumeChannel(ch, e.target.value));
+    slider.addEventListener("change", (e) => pushAudioVolumeChannel(ch, e.target.value));
+  }
+});
+
+document.getElementById("btn-test-doorbell-chime")?.addEventListener("click", async () => {
+  const btn = document.getElementById("btn-test-doorbell-chime");
+  if (btn) btn.textContent = "🔔 Sonando...";
+  try {
+    await fetch("/api/doorbell/test_chime", { method: "POST" });
+  } catch (e) {}
+  setTimeout(() => {
+    if (btn) btn.textContent = "🔊 Probar";
+  }, 3400);
+});
+
+document.getElementById("btn-toggle-settings")?.addEventListener("click", () => {
+  setTimeout(loadAudioVolumes, 120);
+});
+
+loadAudioVolumes();

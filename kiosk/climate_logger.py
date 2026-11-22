@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Climate Logger & Temporal Historian for Domos Smart Home Kiosk
-Maintains historical climate telemetry (temperature, humidity, CO2)
+Maintains historical climate telemetry (temperature, humidity, CO2, PM2.5)
 by sensor, month, and year for multi-line temporal evolution charts.
 """
 import os
@@ -21,7 +21,8 @@ SENSORS_CONFIG = {
         "room": "Salón",
         "color": "#06b6d4",
         "icon": "🛋️",
-        "has_co2": False
+        "has_co2": False,
+        "has_pm25": False
     },
     "dormitorio": {
         "id": "dormitorio",
@@ -30,7 +31,8 @@ SENSORS_CONFIG = {
         "room": "Dormitorio",
         "color": "#10b981",
         "icon": "🛏️",
-        "has_co2": False
+        "has_co2": False,
+        "has_pm25": False
     },
     "aire": {
         "id": "aire",
@@ -39,7 +41,18 @@ SENSORS_CONFIG = {
         "room": "Sótano",
         "color": "#a855f7",
         "icon": "🌬️",
-        "has_co2": True
+        "has_co2": True,
+        "has_pm25": False
+    },
+    "purificador": {
+        "id": "purificador",
+        "tuya_id": "314954236",
+        "name": "Purificador Xiaomi",
+        "room": "Salón",
+        "color": "#38bdf8",
+        "icon": "🌀",
+        "has_co2": False,
+        "has_pm25": True
     },
     "exterior": {
         "id": "exterior",
@@ -48,13 +61,13 @@ SENSORS_CONFIG = {
         "room": "Exterior",
         "color": "#f59e0b",
         "icon": "🌤️",
-        "has_co2": False
+        "has_co2": False,
+        "has_pm25": False
     }
 }
 
 def generate_month_synthetic(year: int, month: int, max_day: int = None, base_anchors: dict = None):
     """Generates realistic diurnal cycle points every 2 hours for a given month."""
-    # Determine days in month
     if month in [1, 3, 5, 7, 8, 10, 12]:
         days_in_month = 31
     elif month in [4, 6, 9, 11]:
@@ -64,7 +77,6 @@ def generate_month_synthetic(year: int, month: int, max_day: int = None, base_an
     
     limit_day = min(days_in_month, max_day) if max_day else days_in_month
 
-    # Seasonal baseline offsets
     month_temp_offsets = {
         8: 5.5,   # Agosto
         9: 3.5,   # Septiembre
@@ -74,45 +86,41 @@ def generate_month_synthetic(year: int, month: int, max_day: int = None, base_an
     }
     m_offset = month_temp_offsets.get(month, 0.0)
 
-    # Base targets: salon ~21.2 + offset, dorm ~20.8 + offset, aire ~22.0 + offset
     salon_base = 21.3 + (m_offset * 0.4)
     dorm_base = 21.0 + (m_offset * 0.4)
     aire_base = 22.2 + (m_offset * 0.3)
+    pur_base = 21.5 + (m_offset * 0.4)
     ext_base = 15.0 + m_offset
 
     samples = []
     random.seed(year * 100 + month)
 
     for day in range(1, limit_day + 1):
-        # Daily weather variation
         day_wave = math.sin((day / limit_day) * math.pi * 3) * 1.2
         ext_day_base = ext_base + day_wave + (random.uniform(-1.0, 1.0))
 
         for hour in range(0, 24, 2):
             dt = datetime(year, month, day, hour, 0, 0)
-            
-            # Diurnal solar cycle: min around 07:00, max around 15:00
             solar_cycle = math.sin(((hour - 7) / 24.0) * 2 * math.pi)
             
-            # Exterior fluctuates strongly (+/- 4 to 6°C)
             ext_t = round(ext_day_base + (solar_cycle * 4.5) + random.uniform(-0.3, 0.3), 1)
             ext_h = int(round(max(35, min(95, 68 - (solar_cycle * 22) + random.uniform(-3, 3)))))
 
-            # Indoor Salon (+/- 0.9°C amplitude)
             salon_t = round(salon_base + (solar_cycle * 0.8) + (day_wave * 0.3) + random.uniform(-0.15, 0.15), 1)
             salon_h = int(round(max(40, min(80, 62 - (solar_cycle * 5) + random.uniform(-2, 2)))))
 
-            # Indoor Dormitorio (cooler in morning, stable at night)
             dorm_t = round(dorm_base + (solar_cycle * 0.7) + (day_wave * 0.3) + random.uniform(-0.15, 0.15), 1)
             dorm_h = int(round(max(40, min(80, 59 - (solar_cycle * 4) + random.uniform(-2, 2)))))
 
-            # Sótano Aire (more thermally buffered, CO2 rises when occupied in afternoon/evening)
             aire_t = round(aire_base + (solar_cycle * 0.4) + (day_wave * 0.2) + random.uniform(-0.1, 0.1), 1)
             aire_h = int(round(max(45, min(80, 63 - (solar_cycle * 3) + random.uniform(-2, 2)))))
             
-            # CO2 curve: baseline 380, evening peak 550-680 ppm
             co2_evening = max(0, math.sin(((hour - 14) / 12.0) * math.pi)) if 14 <= hour <= 23 else 0
             aire_co2 = int(round(370 + (co2_evening * 240) + random.uniform(-15, 25)))
+
+            pur_t = round(pur_base + (solar_cycle * 0.75) + random.uniform(-0.1, 0.1), 1)
+            pur_h = int(round(max(45, min(80, 65 - (solar_cycle * 4) + random.uniform(-2, 2)))))
+            pur_pm = int(round(max(8, min(65, 30 + (solar_cycle * 8) + random.uniform(-5, 8)))))
 
             samples.append({
                 "ts": dt.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -121,27 +129,22 @@ def generate_month_synthetic(year: int, month: int, max_day: int = None, base_an
                 "salon": {"t": salon_t, "h": salon_h},
                 "dormitorio": {"t": dorm_t, "h": dorm_h},
                 "aire": {"t": aire_t, "h": aire_h, "co2": aire_co2},
+                "purificador": {"t": pur_t, "h": pur_h, "pm25": pur_pm},
                 "exterior": {"t": ext_t, "h": ext_h}
             })
 
-    # If anchor values are provided for the last sample, overwrite last sample
     if base_anchors and samples:
         last = samples[-1]
-        for sid, a in base_anchors.items():
-            if sid in last:
-                if "t" in a and a["t"] is not None:
-                    last[sid]["t"] = a["t"]
-                if "h" in a and a["h"] is not None:
-                    last[sid]["h"] = a["h"]
-                if "co2" in a and a["co2"] is not None:
-                    last[sid]["co2"] = a["co2"]
+        if "salon" in base_anchors: last["salon"] = base_anchors["salon"]
+        if "dormitorio" in base_anchors: last["dormitorio"] = base_anchors["dormitorio"]
+        if "aire" in base_anchors: last["aire"] = base_anchors["aire"]
+        if "purificador" in base_anchors: last["purificador"] = base_anchors["purificador"]
+        if "exterior" in base_anchors: last["exterior"] = base_anchors["exterior"]
 
     return samples
 
-def init_climate_history_store():
-    """Initializes or ensures climate_history.json exists with recent months."""
+def init_climate_history_store(current_anchors: dict = None):
     try:
-        now = datetime.now()
         hist = {}
         if CLIMATE_HISTORY_FILE.exists():
             try:
@@ -149,24 +152,26 @@ def init_climate_history_store():
             except Exception:
                 hist = {}
         
-        months_data = hist.get("months", {})
-        
-        # Check if current month and previous 3 months exist
-        # Nov 2026, Oct 2026, Sep 2026, Aug 2026
+        if "months" not in hist:
+            hist["months"] = {}
+
+        now = datetime.now()
         target_months = [
-            (2026, 11, now.day),
-            (2026, 10, None),
-            (2026, 9, None),
-            (2026, 8, None)
+            (2026, 8, 31),
+            (2026, 9, 30),
+            (2026, 10, 31),
+            (2026, 11, now.day)
         ]
 
-        anchors = {
-            "salon": {"t": 21.3, "h": 65},
-            "dormitorio": {"t": 21.3, "h": 60},
-            "aire": {"t": 22.2, "h": 64, "co2": 368},
-            "exterior": {"t": 16.5, "h": 68}
+        anchors = current_anchors or {
+            "salon": {"t": 20.2, "h": 62},
+            "dormitorio": {"t": 21.3, "h": 59},
+            "aire": {"t": 21.7, "h": 66, "co2": 368},
+            "purificador": {"t": 21.5, "h": 69, "pm25": 34},
+            "exterior": {"t": 18.5, "h": 65}
         }
 
+        months_data = hist["months"]
         updated = False
         for y, m, max_d in target_months:
             key = f"{y:04d}-{m:02d}"
@@ -188,7 +193,19 @@ def init_climate_history_store():
         print(f"[ClimateLogger] Error initializing history store: {e}")
         return {"sensors": SENSORS_CONFIG, "months": {}}
 
-def record_current_sample(tuya_climate_list: list, outdoor_t: float = None, outdoor_h: int = None):
+def get_outdoor_meteo(lat=36.7167, lon=-4.2833):
+    import urllib.request
+    try:
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m"
+        req = urllib.request.Request(url, headers={"User-Agent": "DomosKiosk/1.0"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            cur = data.get('current', {})
+            return cur.get('temperature_2m'), cur.get('relative_humidity_2m')
+    except Exception:
+        return None, None
+
+def record_current_sample(tuya_climate_list: list, outdoor_t: float = None, outdoor_h: int = None, xiaomi_devs: list = None):
     """Records a live reading from current sensors into the current month's history."""
     try:
         hist = init_climate_history_store()
@@ -200,14 +217,13 @@ def record_current_sample(tuya_climate_list: list, outdoor_t: float = None, outd
         
         month_list = hist["months"][month_key]
         
-        # Build current sample map
         sample = {
             "ts": now.strftime("%Y-%m-%dT%H:%M:%S"),
             "d": now.day,
             "h": now.hour
         }
 
-        # Match sensors
+        # Match Tuya sensors
         for dev in (tuya_climate_list or []):
             dev_id = dev.get("id")
             state = dev.get("state") or {}
@@ -226,15 +242,39 @@ def record_current_sample(tuya_climate_list: list, outdoor_t: float = None, outd
             if matched_key:
                 entry = {}
                 if temp is not None: entry["t"] = float(temp)
-                if hum is not None: entry["h"] = int(hum)
+                if hum is not None:
+                    h_val = int(hum)
+                    entry["h"] = int(round(h_val / 10.0)) if h_val > 100 else h_val
                 if co2 is not None: entry["co2"] = int(co2)
                 sample[matched_key] = entry
 
-        # Outdoor
+        # Match Xiaomi Purifier
+        for xdev in (xiaomi_devs or []):
+            if xdev.get("kind") == "purifier":
+                xst = xdev.get("state") or {}
+                p_t = xst.get("temperature")
+                p_h = xst.get("humidity")
+                p_aqi = xst.get("aqi")
+                p_entry = {}
+                if p_t is not None: p_entry["t"] = float(p_t)
+                if p_h is not None: p_entry["h"] = int(p_h)
+                if p_aqi is not None: p_entry["pm25"] = int(p_aqi)
+                if p_entry:
+                    sample["purificador"] = p_entry
+
+        # Outdoor fallback if not provided
+        if outdoor_t is None or outdoor_h is None:
+            try:
+                met_t, met_h = get_outdoor_meteo()
+                if outdoor_t is None and met_t is not None: outdoor_t = met_t
+                if outdoor_h is None and met_h is not None: outdoor_h = met_h
+            except Exception:
+                pass
+
         if outdoor_t is not None or outdoor_h is not None:
             sample["exterior"] = {
-                "t": float(outdoor_t) if outdoor_t is not None else 16.5,
-                "h": int(outdoor_h) if outdoor_h is not None else 68
+                "t": float(outdoor_t) if outdoor_t is not None else 18.0,
+                "h": int(outdoor_h) if outdoor_h is not None else 60
             }
 
         # Avoid redundant duplicates if logged less than 5 min ago
@@ -242,7 +282,6 @@ def record_current_sample(tuya_climate_list: list, outdoor_t: float = None, outd
             last = month_list[-1]
             last_ts = datetime.fromisoformat(last["ts"])
             if (now - last_ts).total_seconds() < 300:
-                # Update last record
                 month_list[-1].update(sample)
             else:
                 month_list.append(sample)
@@ -256,10 +295,6 @@ def record_current_sample(tuya_climate_list: list, outdoor_t: float = None, outd
         return False
 
 def get_climate_history(month_str: str = None, metric: str = "temperature"):
-    """
-    Returns filtered and aggregated points for the specified month and metric.
-    metric: 'temperature' ('t'), 'humidity' ('h'), 'co2'
-    """
     hist = init_climate_history_store()
     now = datetime.now()
     if not month_str:
@@ -270,20 +305,28 @@ def get_climate_history(month_str: str = None, metric: str = "temperature"):
 
     samples = months_data.get(month_str, [])
     
-    # Map requested metric to short key
-    metric_key = "t" if metric == "temperature" else ("h" if metric == "humidity" else "co2")
-    unit = "°C" if metric == "temperature" else ("%" if metric == "humidity" else "ppm")
-
-    sensor_ids = ["salon", "dormitorio", "aire"]
-    if metric != "co2":
-        sensor_ids.append("exterior")
+    if metric == "pm25":
+        metric_key = "pm25"
+        unit = "µg/m³"
+        sensor_ids = ["purificador"]
+    elif metric == "co2":
+        metric_key = "co2"
+        unit = "ppm"
+        sensor_ids = ["aire"]
+    elif metric == "humidity":
+        metric_key = "h"
+        unit = "%"
+        sensor_ids = ["salon", "dormitorio", "aire", "purificador", "exterior"]
+    else:
+        metric_key = "t"
+        unit = "°C"
+        sensor_ids = ["salon", "dormitorio", "aire", "purificador", "exterior"]
 
     points = []
     sensor_stats = {sid: {"values": [], "min": None, "max": None, "avg": None, "current": None} for sid in sensor_ids}
 
     for s in samples:
         ts = s.get("ts", "")
-        # Format label: e.g. "15 Nov 12:00"
         try:
             dt = datetime.fromisoformat(ts)
             months_es = ["", "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
@@ -312,13 +355,12 @@ def get_climate_history(month_str: str = None, metric: str = "temperature"):
         if has_val:
             points.append(pt)
 
-    # Compute stats
     for sid in sensor_ids:
         vals = sensor_stats[sid]["values"]
         if vals:
-            sensor_stats[sid]["min"] = round(min(vals), 1 if metric != "co2" else 0)
-            sensor_stats[sid]["max"] = round(max(vals), 1 if metric != "co2" else 0)
-            sensor_stats[sid]["avg"] = round(sum(vals) / len(vals), 1 if metric != "co2" else 0)
+            sensor_stats[sid]["min"] = round(min(vals), 1 if metric not in ("co2", "pm25") else 0)
+            sensor_stats[sid]["max"] = round(max(vals), 1 if metric not in ("co2", "pm25") else 0)
+            sensor_stats[sid]["avg"] = round(sum(vals) / len(vals), 1 if metric not in ("co2", "pm25") else 0)
         del sensor_stats[sid]["values"]
 
     return {
@@ -341,11 +383,8 @@ def get_climate_history(month_str: str = None, metric: str = "temperature"):
     }
 
 if __name__ == "__main__":
-    print("Testing climate history store initialization...")
-    CLIMATE_HISTORY_FILE = Path("/tmp/climate_history_test.json")
-    h = init_climate_history_store()
-    print("Available months:", list(h.get("months", {}).keys()))
+    print("Testing climate logger...")
     res = get_climate_history("2026-11", "temperature")
-    print(f"Loaded {len(res['points'])} points for 2026-11 temperature.")
+    print(f"Loaded {len(res['points'])} points for 2026-11.")
     for s in res["sensors"]:
         print(f"  {s['name']}: Min={s['stats'].get('min')} Max={s['stats'].get('max')} Avg={s['stats'].get('avg')} {res['unit']}")

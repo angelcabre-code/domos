@@ -1,0 +1,8 @@
+[Unit]
+Description=Doctor DOMOS Nightly Hybrid Diagnostics & Safe Self-Healing
+
+[Service]
+Type=oneshot
+User=domos
+WorkingDirectory=/opt/domoskiosk
+ExecStart=/usr/bin/python3 /opt/domoskiosk/doctor_domos.py scheduled

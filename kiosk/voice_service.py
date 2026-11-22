@@ -8,6 +8,7 @@ import datetime
 import json
 import logging
 import os
+from pathlib import Path
 import queue
 import subprocess
 import threading
@@ -232,6 +233,249 @@ def execute_command(raw_text: str):
     set_ui_assistant("processing", prompt=raw_text.capitalize())
     reply_msg = "No entendí la orden. Prueba con luces, tiempo, hora, placas o radio."
 
+    import re as _re_cmd
+
+    # 00Z. Intercomunicador a altavoces Google (Salita, Dormitorio, Sótano, Todos)
+    if any(k in clean for k in ("avisa en ", "anuncia en ", "di en ", "megafonia", "intercomunicador")):
+        target = "all"
+        if "sotano" in clean:
+            target = "sotano"
+        elif "dormitorio" in clean or "habitacion" in clean:
+            target = "dormitorio_1"
+        elif "salita" in clean or "cocina" in clean:
+            target = "salita"
+        msg_body = raw_text
+        for sep in (" que ", " en el sotano ", " en el dormitorio ", " en la cocina ", " en la salita ", " en toda la casa "):
+            if sep in raw_text.lower():
+                msg_body = raw_text.lower().split(sep, 1)[1].strip()
+                break
+        if len(msg_body) < 2:
+            msg_body = "Atención desde el salón."
+        try:
+            requests.post(f"{API_URL}/api/cast/announce", json={"targets": target, "text": msg_body}, timeout=8)
+            reply_msg = f"Aviso enviado a {'toda la casa' if target == 'all' else target}."
+        except Exception:
+            reply_msg = "No pude enviar el aviso a los altavoces Google."
+        set_ui_assistant("speaking", prompt=raw_text.capitalize(), reply=reply_msg)
+        speak_text(reply_msg)
+        schedule_idle_reset(4.5)
+        return
+
+    # 00Y. Doctor DOMOS: leer diagnóstico en voz alta
+    if any(k in clean for k in ("diagnostico", "doctor", "salud del sistema", "informe de salud", "lee el informe")):
+        try:
+            requests.post(f"{API_URL}/api/doctor/speak", timeout=15)
+            set_ui_assistant("speaking", prompt=raw_text.capitalize(), reply="Leyendo el diagnóstico de Doctor DOMOS...")
+            schedule_idle_reset(12.0)
+        except Exception:
+            reply_msg = "No pude leer el diagnóstico de Doctor DOMOS."
+            set_ui_assistant("speaking", prompt=raw_text.capitalize(), reply=reply_msg)
+            speak_text(reply_msg)
+            schedule_idle_reset(5.0)
+        return
+
+    # 0A. Silenciar timbre del videoportero
+    if any(k in clean for k in ("silencia el timbre", "para el timbre", "calla el timbre", "quita el timbre", "silenciar timbre", "parar timbre")):
+        try:
+            requests.post(f"{API_URL}/api/doorbell/silence", timeout=2)
+            reply_msg = "Timbre silenciado."
+        except Exception:
+            reply_msg = "No pude silenciar el timbre."
+        set_ui_assistant("speaking", prompt=raw_text.capitalize(), reply=reply_msg)
+        speak_text(reply_msg)
+        schedule_idle_reset(4.0)
+        return
+
+    # 0B. Calidad del Aire, CO2 y Polen (antes de "aire" para no confundir con Aire Acondicionado)
+    if any(k in clean for k in ("calidad del aire", "calidad aire", "polen", "co2", "dioxido", "particulas", "aire del sotano", "aire interior", "humo")):
+        try:
+            aq = requests.get(f"{API_URL}/api/air/quality", timeout=3).json()
+            ev = aq.get("evaluation") or {}
+            ind = aq.get("indoor") or {}
+            pur = ind.get("purifier") or {}
+            sot = ind.get("sotano") or {}
+            out = aq.get("outdoor") or {}
+            badge = str(ev.get("badge") or "Buena").replace("🟢", "").replace("🟡", "").replace("🔴", "").strip()
+            reply_msg = (
+                f"La calidad del aire es {badge}. "
+                f"En el salón hay {pur.get('aqi', '--')} de PM2.5, "
+                f"en el sótano {sot.get('co2', '--')} partes por millón de CO2, "
+                f"y el polen exterior está {out.get('pollen_level', 'bajo')}."
+            )
+        except Exception:
+            reply_msg = "No pude consultar la calidad del aire ahora mismo."
+        set_ui_assistant("speaking", prompt=raw_text.capitalize(), reply=reply_msg)
+        speak_text(reply_msg)
+        schedule_idle_reset(6.5)
+        return
+
+    # 0C. Ahorro Solar y Autoconsumo Inteligente (consulta + cambio de modo)
+    if any(k in clean for k in ("autoconsumo", "ahorro solar", "excedente", "excedentes", "modo vacaciones", "pausa el ahorro", "pausar ahorro", "como va el ahorro")):
+        try:
+            if "vacaciones" in clean:
+                requests.post(f"{API_URL}/api/energy/savings/mode", json={"mode": "vacation"}, timeout=2)
+                reply_msg = "Modo vacaciones activado. Termo y secatoallas permanecerán apagados."
+            elif any(w in clean for w in ("pausa", "deten", "desactiva", "manual", "quita")):
+                requests.post(f"{API_URL}/api/energy/savings/mode", json={"mode": "paused"}, timeout=2)
+                reply_msg = "Autoconsumo pausado en modo manual."
+            elif any(w in clean for w in ("activa", "enciende", "pon", "reanuda")):
+                requests.post(f"{API_URL}/api/energy/savings/mode", json={"mode": "auto"}, timeout=2)
+                reply_msg = "Autoconsumo inteligente activado."
+            else:
+                es = requests.get(f"{API_URL}/api/energy/savings", timeout=3).json()
+                mode_map = {"auto": "activo", "paused": "pausado", "vacation": "en modo vacaciones"}
+                m_txt = mode_map.get((es.get("config") or {}).get("mode", "auto"), "activo")
+                tel = es.get("telemetry") or {}
+                s_kwh = (es.get("summary") or {}).get("total_saved_kwh_today", 0)
+                reply_msg = (
+                    f"El ahorro solar está {m_txt}. "
+                    f"Generación actual de {int(tel.get('solar_w', 0))} vatios y {s_kwh} kilovatios hora aprovechados hoy."
+                )
+        except Exception:
+            reply_msg = "No pude consultar el ahorro solar."
+        set_ui_assistant("speaking", prompt=raw_text.capitalize(), reply=reply_msg)
+        speak_text(reply_msg)
+        schedule_idle_reset(6.0)
+        return
+
+    # 0D. Avisos, Incidencias y Alertas del Hogar
+    if any(k in clean for k in ("avisos", "aviso", "incidencias", "incidencia", "alertas", "alerta", "pilas", "bateria baja", "baterias bajas")):
+        try:
+            if any(w in clean for w in ("silencia", "borra", "quita", "limpia", "resuelve", "revisado")):
+                requests.post(f"{API_URL}/api/incidents/resolve", json={}, timeout=2)
+                reply_msg = "Todos los avisos han sido silenciados."
+            else:
+                inc = requests.get(f"{API_URL}/api/incidents", timeout=3).json()
+                items = inc.get("incidents") or []
+                if not items:
+                    reply_msg = "No hay ningún aviso activo. Todo funciona correctamente en casa."
+                else:
+                    titles = [i.get("title", "Aviso") for i in items[:3]]
+                    extra = f" y {len(items) - 3} más" if len(items) > 3 else ""
+                    reply_msg = f"Tienes {len(items)} avisos activos: " + ", ".join(titles) + extra + "."
+        except Exception:
+            reply_msg = "No pude consultar los avisos del sistema."
+        set_ui_assistant("speaking", prompt=raw_text.capitalize(), reply=reply_msg)
+        speak_text(reply_msg)
+        schedule_idle_reset(6.5)
+        return
+
+    # 0E. Armar / Desarmar Alarma + Consulta completa de seguridad
+    if any(k in clean for k in ("arma la alarma", "armar alarma", "activa la alarma", "activar alarma", "pon la alarma", "poner alarma", "alarma en casa", "desarma", "desarmar", "quita la alarma", "desactiva la alarma")):
+        try:
+            if any(w in clean for w in ("desarma", "desarmar", "quita", "desactiva", "apaga")):
+                requests.post(f"{API_URL}/api/devices/control", json={"device_id": "64326051e8db8480acc0", "code": "master_mode", "value": "disarmed"}, timeout=3)
+                reply_msg = "Alarma desarmada."
+            elif "en casa" in clean or "noche" in clean or "parcial" in clean:
+                requests.post(f"{API_URL}/api/devices/control", json={"device_id": "64326051e8db8480acc0", "code": "master_mode", "value": "home"}, timeout=3)
+                reply_msg = "Alarma armada en modo en casa."
+            else:
+                requests.post(f"{API_URL}/api/devices/control", json={"device_id": "64326051e8db8480acc0", "code": "master_mode", "value": "armed"}, timeout=3)
+                reply_msg = "Alarma armada en modo total."
+        except Exception:
+            reply_msg = "No pude cambiar el estado de la alarma."
+        set_ui_assistant("speaking", prompt=raw_text.capitalize(), reply=reply_msg)
+        speak_text(reply_msg)
+        schedule_idle_reset(5.0)
+        return
+
+    # 0F. Copia de seguridad (Backup) por voz
+    if any(k in clean for k in ("copia de seguridad", "backup", "respaldo")):
+        try:
+            bres = requests.post(f"{API_URL}/api/system/backup", timeout=15).json()
+            created = bres.get("created") or {}
+            sd_txt = " y copiada en la tarjeta SD" if created.get("sd_mirrored") else ""
+            reply_msg = f"Copia de seguridad completada con {created.get('files_count', 0)} archivos{sd_txt}."
+        except Exception:
+            reply_msg = "Hubo un problema al crear la copia de seguridad."
+        set_ui_assistant("speaking", prompt=raw_text.capitalize(), reply=reply_msg)
+        speak_text(reply_msg)
+        schedule_idle_reset(5.5)
+        return
+
+    # 0G. Agenda / Calendario Familiar
+    if any(k in clean for k in ("agenda", "calendario", "eventos", "citas", "que tengo hoy", "que tengo manana", "recordatorios")):
+        try:
+            cal = requests.get(f"{API_URL}/api/calendar", timeout=3).json()
+            evs = cal.get("events") or []
+            target_dt = datetime.datetime.now() + (datetime.timedelta(days=1) if "manana" in clean else datetime.timedelta(days=0))
+            target_str = target_dt.strftime("%Y-%m-%d")
+            day_lbl = "mañana" if "manana" in clean else "hoy"
+            day_evs = [e for e in evs if str(e.get("date", "")).startswith(target_str)]
+            if not day_evs:
+                reply_msg = f"No tienes ningún evento apuntado para {day_lbl}."
+            else:
+                desc = []
+                for e in day_evs[:4]:
+                    t_str = f" a las {e['reminder_time']}" if e.get("reminder_time") else ""
+                    desc.append(f"{e.get('title', 'Evento')}{t_str}")
+                reply_msg = f"Para {day_lbl} tienes {len(day_evs)} eventos: " + ", ".join(desc) + "."
+        except Exception:
+            reply_msg = "No pude consultar el calendario."
+        set_ui_assistant("speaking", prompt=raw_text.capitalize(), reply=reply_msg)
+        speak_text(reply_msg)
+        schedule_idle_reset(6.5)
+        return
+
+    # 0H. Consumo eléctrico de enchufes (en vivo + hoy)
+    if any(k in clean for k in ("consumo", "cuanto consume", "gasto electrico", "cuanto gasta")):
+        try:
+            ph = requests.get(f"{API_URL}/api/power/history?period=daily", timeout=3).json()
+            totals = ph.get("totals") or {}
+            termo_kwh = round(float(totals.get("termo", 0)), 2)
+            sec_kwh = round(float(totals.get("secatoallas", 0)), 2)
+            sot_kwh = round(float(totals.get("breaker_sotano", 0)), 2)
+            reply_msg = (
+                f"Hoy llevan consumidos: el termo {termo_kwh} kilovatios hora, "
+                f"el secatoallas {sec_kwh}, y el sótano {sot_kwh} kilovatios hora."
+            )
+        except Exception:
+            reply_msg = "No pude consultar el consumo eléctrico."
+        set_ui_assistant("speaking", prompt=raw_text.capitalize(), reply=reply_msg)
+        speak_text(reply_msg)
+        schedule_idle_reset(6.0)
+        return
+
+    # 0I. Luz Dormitorio (IR local 192.168.5.73)
+    if any(k in clean for k in ("luz del dormitorio", "luz dormitorio", "lampara del dormitorio", "lampara dormitorio")):
+        try:
+            requests.post(f"{API_URL}/api/devices/control", json={"device_id": "bffaf4f9e3e652a793t9n0", "code": "PowerToggle", "value": "PowerToggle"}, timeout=3)
+            reply_msg = "Enviando señal infrarroja a la luz del dormitorio."
+        except Exception:
+            reply_msg = "No pude accionar la luz del dormitorio."
+        set_ui_assistant("speaking", prompt=raw_text.capitalize(), reply=reply_msg)
+        speak_text(reply_msg)
+        schedule_idle_reset(4.5)
+        return
+
+    # 0J. Volúmenes independientes por canal (radio, timbre, cámaras, general)
+    if "volumen" in clean and any(ch in clean for ch in ("radio", "timbre", "portero", "camara", "camaras", "general")):
+        ch_key = "master"
+        ch_lbl = "general"
+        if "radio" in clean:
+            ch_key, ch_lbl = "radio", "de la radio"
+        elif "timbre" in clean:
+            ch_key, ch_lbl = "doorbell", "del timbre"
+        elif any(w in clean for w in ("camara", "camaras", "portero")):
+            ch_key, ch_lbl = "cameras", "de las cámaras"
+        try:
+            cur_v = (requests.get(f"{API_URL}/api/audio/volumes", timeout=2).json().get("volumes") or {}).get(ch_key, 75)
+            m_pct = _re_cmd.search(r"(\d{1,3})", clean)
+            if m_pct:
+                new_v = max(0, min(100, int(m_pct.group(1))))
+            elif any(w in clean for w in ("baja", "menos", "suave", "flojo")):
+                new_v = max(0, int(cur_v) - 15)
+            else:
+                new_v = min(100, int(cur_v) + 15)
+            requests.post(f"{API_URL}/api/audio/volumes", json={ch_key: new_v}, timeout=2)
+            reply_msg = f"Volumen {ch_lbl} ajustado al {new_v} por ciento."
+        except Exception:
+            reply_msg = f"No pude ajustar el volumen {ch_lbl}."
+        set_ui_assistant("speaking", prompt=raw_text.capitalize(), reply=reply_msg)
+        speak_text(reply_msg)
+        schedule_idle_reset(4.5)
+        return
+
     # 00. Dispositivos Xiaomi (Aspiradora & Purificador)
     if any(k in clean for k in ("aspirador", "aspiradora", "robot", "limpia la casa", "barrer")):
         if any(w in clean for w in ("base", "carga", "vuelve", "casa", "regresa")):
@@ -289,16 +533,26 @@ def execute_command(raw_text: str):
         schedule_idle_reset(5.0)
         return
     elif any(k in clean for k in ("tele", "television", "televisor")):
-        tv_id = "bf221ae9a7e021a4374abl"
-        if any(w in clean for w in ("sube", "mas volumen")):
-            requests.post(f"{API_URL}/api/devices/control", json={"device_id": tv_id, "code": "Volume+", "value": "Volume+"}, timeout=2)
-            reply_msg = "Subiendo el volumen de la tele."
+        is_bedroom = any(w in clean for w in ("dormitorio", "habitacion", "cuarto"))
+        tv_id = "bf9b0283af185020bd8evy" if is_bedroom else "bf221ae9a7e021a4374abl"
+        tv_lbl = "del dormitorio" if is_bedroom else "del salón"
+        if any(w in clean for w in ("sube canal", "siguiente canal", "canal arriba", "otro canal")):
+            code, reply_msg = "Channel+", f"Cambiando al siguiente canal en la tele {tv_lbl}."
+        elif any(w in clean for w in ("baja canal", "canal anterior", "canal abajo")):
+            code, reply_msg = "Channel-", f"Cambiando al canal anterior en la tele {tv_lbl}."
+        elif any(w in clean for w in ("sube", "mas volumen")):
+            code, reply_msg = "Volume+", f"Subiendo el volumen de la tele {tv_lbl}."
         elif any(w in clean for w in ("baja", "menos volumen")):
-            requests.post(f"{API_URL}/api/devices/control", json={"device_id": tv_id, "code": "Volume-", "value": "Volume-"}, timeout=2)
-            reply_msg = "Bajando el volumen de la tele."
+            code, reply_msg = "Volume-", f"Bajando el volumen de la tele {tv_lbl}."
+        elif any(w in clean for w in ("atras", "volver", "vuelve")):
+            code, reply_msg = "Back", f"Pulsando atrás en la tele {tv_lbl}."
+        elif any(w in clean for w in ("inicio", "home", "menu")):
+            code, reply_msg = "Home", f"Abriendo inicio en la tele {tv_lbl}."
+        elif "ok" in clean or "acepta" in clean:
+            code, reply_msg = "OK", f"Pulsando OK en la tele {tv_lbl}."
         else:
-            requests.post(f"{API_URL}/api/devices/control", json={"device_id": tv_id, "code": "Power", "value": "Power"}, timeout=2)
-            reply_msg = "Enviando señal a la tele del salón."
+            code, reply_msg = "Power", f"Enviando encendido a la tele {tv_lbl}."
+        requests.post(f"{API_URL}/api/devices/control", json={"device_id": tv_id, "code": code, "value": code}, timeout=3)
         set_ui_assistant("speaking", prompt=raw_text.capitalize(), reply=reply_msg)
         speak_text(reply_msg)
         schedule_idle_reset(5.0)
@@ -308,7 +562,7 @@ def execute_command(raw_text: str):
     if any(w in clean for w in ("hola", "buenos dias", "buenas tardes", "buenas noches")):
         reply_msg = "Hola, soy Domos. ¿En qué te puedo ayudar?"
     elif any(w in clean for w in ("quien eres", "que sabes hacer", "ayuda")):
-        reply_msg = "Controlo tus luces, enchufes, cámaras, radio, placas solares y te digo la hora o el tiempo."
+        reply_msg = "Controlo luces, enchufes, teles, aires, alarma, timbre, volúmenes, radio, ahorro solar, calidad del aire, avisos, agenda y copias de seguridad."
     elif "gracias" in clean:
         reply_msg = "De nada, para eso estoy."
 
@@ -436,6 +690,8 @@ def execute_command(raw_text: str):
     speak_text(reply_msg)
     schedule_idle_reset(5.5)
 
+STRICT_WAKE_WORDS = ("domos", "domo", "domas", "domus", "donos", "tomos", "lomos")
+
 def strip_wake_word(clean_text: str):
     words = clean_text.split()
     if not words:
@@ -445,6 +701,10 @@ def strip_wake_word(clean_text: str):
     if len(words) <= 2 and any(w in WAKE_ALIASES for w in words):
         rem = " ".join(w for w in words if w not in WAKE_ALIASES).strip()
         return True, rem
+    # Also detect strict wake word anywhere in a longer sentence (e.g. when TV audio precedes "Domos")
+    for idx in range(len(words) - 1, -1, -1):
+        if words[idx] in STRICT_WAKE_WORDS:
+            return True, " ".join(words[idx + 1:]).strip()
     return False, clean_text
 
 def main():

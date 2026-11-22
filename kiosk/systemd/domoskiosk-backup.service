@@ -1,0 +1,7 @@
+[Unit]
+Description=DOMOS Automatic Configuration & Code Backup
+
+[Service]
+Type=oneshot
+User=domos
+ExecStart=/usr/bin/python3 /opt/domoskiosk/backup_domos.py --reason scheduled

@@ -165,7 +165,7 @@ class DomosPresenceManager:
                 if isinstance(volts, (int, float)) and volts < 50:
                     outage = True
                 if not outage:
-                    plug = next((p for p in (data.get("plugs") or []) if p.get("id") == self.config.get("charger_plug_id", "charger_plug")), None)
+                    plug = next((p for p in (data.get("plugs") or []) if p.get("id") == "bf2989a92a26b9381drtlg"), None)
                     if plug and (plug.get("state") or {}).get("state") is True:
                         bats = list(Path("/sys/class/power_supply").glob("BAT*"))
                         if bats:

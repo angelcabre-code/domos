@@ -1,0 +1,11 @@
+[Unit]
+Description=Domos Kiosk Bay Trail Anti-Freeze & No-Sleep Guard
+After=multi-user.target network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c "for f in /sys/devices/system/cpu/cpu*/cpuidle/state[2345]/disable; do [ -f $f ] && echo 1 > $f || true; done; /usr/sbin/iw dev wlan0 set power_save off || true; for p in /sys/bus/pci/devices/*/power/control /sys/bus/i2c/devices/*/power/control; do [ -f $p ] && echo on > $p 2>/dev/null || true; done"
+
+[Install]
+WantedBy=multi-user.target
